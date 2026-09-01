@@ -1,7 +1,7 @@
-"""(Re)génère les historiques JSON utilisés par le test de replay.
+"""(Re)generate the JSON histories used by the replay test.
 
-On exécute les workflows sur le serveur de test (time-skipping), puis on
-exporte l'historique complet au format JSON dans ``tests/histories/``.
+We run the workflows on the test server (time-skipping), then export the full
+history as JSON into ``tests/histories/``.
 
 Usage::
 

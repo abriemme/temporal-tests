@@ -1,4 +1,4 @@
-"""Fixtures partagées par la suite de tests."""
+"""Fixtures shared by the test suite."""
 
 from __future__ import annotations
 
@@ -11,11 +11,11 @@ from temporalio.testing import WorkflowEnvironment
 
 @pytest_asyncio.fixture
 async def time_skipping_env() -> AsyncIterator[WorkflowEnvironment]:
-    """Serveur de test Temporal avec time-skipping automatique.
+    """Temporal test server with automatic time-skipping.
 
-    ``start_time_skipping()`` télécharge/lance le test server intégré et avance
-    l'horloge automatiquement dès que tous les workers sont en attente d'un
-    timer : un ``workflow.sleep(days=1)`` se résout instantanément.
+    ``start_time_skipping()`` downloads/starts the bundled test server and
+    advances the clock automatically as soon as all workers are waiting on a
+    timer: a ``workflow.sleep(days=1)`` resolves instantly.
     """
     env = await WorkflowEnvironment.start_time_skipping()
     try:

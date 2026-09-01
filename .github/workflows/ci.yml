@@ -24,9 +24,9 @@ jobs:
       - name: Sync dependencies (from uv.lock)
         run: uv sync --frozen
 
-      # Tests unitaires (time-skipping) + test de replay sur les historiques
-      # commités dans tests/histories/. Le replay télécharge le test server
-      # Temporal intégré ; rien d'autre à provisionner.
+      # Unit tests (time-skipping) + replay test on the histories committed in
+      # tests/histories/. Replay downloads the bundled Temporal test server;
+      # nothing else to provision.
       - name: Run tests (unit + replay)
         env:
           GIT_SHA: ${{ github.sha }}
@@ -57,7 +57,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          # On ne pousse que sur la branche par défaut ; sinon on build seulement.
+          # Only push on the default branch; otherwise build only.
           push: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
           build-args: |
             GIT_SHA=${{ github.sha }}

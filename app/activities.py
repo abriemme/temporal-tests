@@ -1,4 +1,4 @@
-"""Activities du projet d'exemple."""
+"""Activities for the example project."""
 
 from __future__ import annotations
 
@@ -14,10 +14,10 @@ class GreetingInput:
 
 @activity.defn
 async def compose_greeting(payload: GreetingInput) -> str:
-    """Construit un message de salutation.
+    """Build a greeting message.
 
-    Une activity « pure » suffit pour l'exemple ; l'important est de montrer le
-    flux workflow -> activity dans l'historique rejoué par les tests de replay.
+    A "pure" activity is enough for the example; the point is to show the
+    workflow -> activity flow in the history replayed by the replay tests.
     """
     activity.logger.info("Composing greeting for %s", payload.name)
     return f"Hello, {payload.name}!"
@@ -25,6 +25,6 @@ async def compose_greeting(payload: GreetingInput) -> str:
 
 @activity.defn
 async def shout(text: str) -> str:
-    """Deuxième activity, ajoutée derrière un ``workflow.patched`` côté workflow."""
+    """Second activity, added behind a ``workflow.patched`` on the workflow side."""
     activity.logger.info("Shouting: %s", text)
     return text.upper()

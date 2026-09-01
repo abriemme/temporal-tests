@@ -1,4 +1,4 @@
-"""Tests des workflows via le serveur de test avec time-skipping."""
+"""Workflow tests using the test server with time-skipping."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ async def test_greeting_workflow(time_skipping_env: WorkflowEnvironment) -> None
             task_queue=TASK_QUEUE,
         )
 
-    # Le patch ``greeting-shout-v2`` est actif -> message en majuscules.
+    # The ``greeting-shout-v2`` patch is active -> uppercase message.
     assert result == "HELLO, WORLD!"
 
 
@@ -35,10 +35,10 @@ async def test_greeting_workflow(time_skipping_env: WorkflowEnvironment) -> None
 async def test_sleepy_workflow_skips_time(
     time_skipping_env: WorkflowEnvironment,
 ) -> None:
-    """Le workflow dort 1 jour ; le test doit passer en quelques millisecondes.
+    """The workflow sleeps 1 day; the test must pass in a few milliseconds.
 
-    C'est tout l'intérêt de ``start_time_skipping()`` : l'horloge du serveur de
-    test saute le timer sans attendre le temps réel.
+    This is the whole point of ``start_time_skipping()``: the test server's clock
+    skips the timer without waiting for real time.
     """
     async with Worker(
         time_skipping_env.client,

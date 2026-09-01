@@ -1,9 +1,9 @@
-"""Worker Temporal utilisant le Worker Deployment Versioning.
+"""Temporal worker using Worker Deployment Versioning.
 
-Le ``build_id`` provient du SHA git (cf. ``app.config.get_build_id``). Chaque
-build/déploiement expose donc une nouvelle *version* de worker sous le même
-``deployment_name``, ce qui permet des rolling deployments contrôlés côté
-serveur (rampe de trafic, rollback, etc.).
+The ``build_id`` comes from the git SHA (see ``app.config.get_build_id``). Each
+build/deployment therefore exposes a new worker *version* under the same
+``deployment_name``, which enables controlled rolling deployments on the server
+side (traffic ramp, rollback, etc.).
 """
 
 from __future__ import annotations
@@ -53,11 +53,11 @@ async def main() -> None:
                 deployment_name=DEPLOYMENT_NAME,
                 build_id=build_id,
             ),
-            # Active le Worker Deployment Versioning : le serveur route les
-            # tâches vers la bonne version en fonction du comportement déclaré.
+            # Enable Worker Deployment Versioning: the server routes tasks to the
+            # right version based on the declared behavior.
             use_worker_versioning=True,
-            # Filet de sécurité pour les workflows qui ne déclarent pas
-            # explicitement leur ``versioning_behavior``.
+            # Safety net for workflows that don't explicitly declare their
+            # ``versioning_behavior``.
             default_versioning_behavior=VersioningBehavior.PINNED,
         ),
     )

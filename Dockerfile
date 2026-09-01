@@ -1,10 +1,10 @@
 FROM python:3.14-slim
 
-# uv pour installer les dépendances depuis uv.lock (reproductible).
+# uv to install dependencies from uv.lock (reproducible).
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
-# Le SHA git est passé au build et figé dans l'image : le worker l'utilise
-# comme build_id de sa version de Worker Deployment.
+# The git SHA is passed at build time and baked into the image: the worker uses
+# it as the build_id of its Worker Deployment version.
 ARG GIT_SHA=unknown
 ENV GIT_SHA=${GIT_SHA}
 ENV PYTHONUNBUFFERED=1 \
@@ -15,11 +15,11 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# Couche de dépendances mise en cache tant que pyproject.toml/uv.lock ne changent pas.
+# Dependency layer, cached as long as pyproject.toml/uv.lock don't change.
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
 COPY app ./app
 
-# Lance le worker versionné.
+# Run the versioned worker.
 CMD ["python", "-m", "app.worker"]

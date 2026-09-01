@@ -1,8 +1,8 @@
-"""Configuration partagée entre le worker, les workflows et les tests.
+"""Configuration shared between the worker, the workflows and the tests.
 
-Le `build_id` est dérivé du SHA git du commit courant. En CI, la variable
-d'environnement ``GIT_SHA`` est injectée par GitHub Actions (``github.sha``).
-En local, on retombe sur ``git rev-parse HEAD``.
+The ``build_id`` is derived from the git SHA of the current commit. In CI, the
+``GIT_SHA`` environment variable is injected by GitHub Actions (``github.sha``).
+Locally, we fall back to ``git rev-parse HEAD``.
 """
 
 from __future__ import annotations
@@ -10,25 +10,25 @@ from __future__ import annotations
 import os
 import subprocess
 
-# Nom logique du déploiement de workers. Il doit rester stable dans le temps :
-# c'est l'identité sous laquelle toutes les versions (build_id) se succèdent.
+# Logical name of the worker deployment. It must stay stable over time: it is
+# the identity under which all versions (build_ids) succeed one another.
 DEPLOYMENT_NAME = "greeting-app"
 
-# Task queue utilisée par le worker et les clients.
+# Task queue used by the worker and the clients.
 TASK_QUEUE = "greeting-task-queue"
 
-# Adresse du serveur Temporal (surchargée en prod via l'environnement).
+# Temporal server address (overridden in prod via the environment).
 TEMPORAL_ADDRESS = os.environ.get("TEMPORAL_ADDRESS", "localhost:7233")
 TEMPORAL_NAMESPACE = os.environ.get("TEMPORAL_NAMESPACE", "default")
 
 
 def get_build_id() -> str:
-    """Retourne le SHA git à utiliser comme ``build_id`` de la version de worker.
+    """Return the git SHA to use as the ``build_id`` of the worker version.
 
-    Ordre de résolution :
-    1. ``GIT_SHA`` (injecté par la CI) ;
-    2. ``git rev-parse HEAD`` en local ;
-    3. ``"unknown"`` en dernier recours (repo absent).
+    Resolution order:
+    1. ``GIT_SHA`` (injected by CI);
+    2. ``git rev-parse HEAD`` locally;
+    3. ``"unknown"`` as a last resort (no repo available).
     """
     sha = os.environ.get("GIT_SHA")
     if sha:

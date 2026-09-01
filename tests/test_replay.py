@@ -1,14 +1,13 @@
-"""Test de replay basé sur des historiques JSON commités.
+"""Replay test based on committed JSON histories.
 
-Le replay rejoue un historique d'exécution réel contre le code *actuel* des
-workflows. Si une modification casse le déterminisme (suppression d'une commande,
-réordonnancement, activity retirée sans ``workflow.patched``...), le replay lève
-une ``NondeterminismError`` et le test échoue — avant tout déploiement.
+Replay re-runs a real execution history against the *current* workflow code. If
+a change breaks determinism (removing a command, reordering, dropping an
+activity without ``workflow.patched``...), replay raises a
+``NondeterminismError`` and the test fails — before any deployment.
 
-Les historiques vivent dans ``tests/histories/*.json`` (format JSON export
-Temporal, celui de ``temporal workflow show --output json`` ou de
-``WorkflowHistory.to_json``). Voir ``scripts/generate_history.py`` pour les
-(re)générer.
+Histories live in ``tests/histories/*.json`` (Temporal JSON export format, the
+one from ``temporal workflow show --output json`` or ``WorkflowHistory.to_json``).
+See ``scripts/generate_history.py`` to (re)generate them.
 """
 
 from __future__ import annotations
@@ -37,20 +36,20 @@ def _history_files() -> list[Path]:
 @pytest.mark.asyncio
 async def test_replay_history(history_path: Path) -> None:
     history = WorkflowHistory.from_json(
-        # L'id du workflow n'a pas d'importance pour le replay ; on prend le nom
-        # de fichier pour des messages d'erreur lisibles.
+        # The workflow id does not matter for replay; we use the file name for
+        # readable error messages.
         workflow_id=history_path.stem,
         history=json.loads(history_path.read_text()),
     )
 
     replayer = Replayer(workflows=[GreetingWorkflow, SleepyGreetingWorkflow])
-    # Lève NondeterminismError si le code actuel diverge de l'historique.
+    # Raises NondeterminismError if the current code diverges from the history.
     await replayer.replay_workflow(history)
 
 
 def test_histories_present() -> None:
-    """Garde-fou : au moins un historique doit être commité."""
+    """Guardrail: at least one history must be committed."""
     assert _history_files(), (
-        "Aucun historique dans tests/histories/. "
-        "Lancez `python scripts/generate_history.py` pour en générer."
+        "No history in tests/histories/. "
+        "Run `python scripts/generate_history.py` to generate one."
     )

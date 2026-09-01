@@ -1,12 +1,12 @@
-"""Workflows du projet d'exemple.
+"""Workflows for the example project.
 
-Le workflow illustre deux mécanismes clés de Temporal :
+The workflow illustrates two key Temporal mechanisms:
 
-* ``workflow.patched`` : permet de faire évoluer le code d'un workflow tout en
-  gardant compatibles les exécutions déjà en cours (et les historiques rejoués).
-* ``versioning_behavior`` : déclare comment ce workflow doit se comporter vis à
-  vis du Worker Deployment Versioning. ``PINNED`` épingle chaque exécution à la
-  version (build_id) qui l'a démarrée, ce qui est le choix sûr par défaut.
+* ``workflow.patched``: lets you evolve a workflow's code while keeping
+  in-flight executions (and replayed histories) compatible.
+* ``versioning_behavior``: declares how this workflow should behave with respect
+  to Worker Deployment Versioning. ``PINNED`` pins each execution to the version
+  (build_id) that started it, which is the safe default choice.
 """
 
 from __future__ import annotations
@@ -16,13 +16,13 @@ from datetime import timedelta
 from temporalio import workflow
 from temporalio.common import RetryPolicy, VersioningBehavior
 
-# Les imports du "monde extérieur" (activities) passent par le passthrough du
-# sandbox : ils sont importés ici pour partager les types/refs d'activities.
+# Imports from the "outside world" (activities) go through the sandbox
+# passthrough: they are imported here to share the activity types/refs.
 with workflow.unsafe.imports_passed_through():
     from app.activities import GreetingInput, compose_greeting, shout
 
-# Identifiant du patch. Il doit rester stable : il est écrit dans l'historique
-# sous forme d'un marqueur, et relu lors du replay.
+# Patch identifier. It must stay stable: it is written into the history as a
+# marker and read back during replay.
 _SHOUT_PATCH = "greeting-shout-v2"
 
 
@@ -37,13 +37,13 @@ class GreetingWorkflow:
             retry_policy=RetryPolicy(maximum_attempts=3),
         )
 
-        # Évolution de comportement introduite après coup, protégée par un patch.
+        # Behavior change introduced after the fact, guarded by a patch.
         #
-        # * Nouveau code (marqueur présent, ou première exécution) : on met le
-        #   message en majuscules via une seconde activity.
-        # * Ancien historique (pas de marqueur au moment du replay) :
-        #   ``workflow.patched`` renvoie False -> on garde l'ancien comportement,
-        #   ce qui préserve le déterminisme du replay.
+        # * New code (marker present, or first execution): uppercase the message
+        #   via a second activity.
+        # * Old history (no marker at replay time): ``workflow.patched`` returns
+        #   False -> we keep the old behavior, which preserves replay
+        #   determinism.
         if workflow.patched(_SHOUT_PATCH):
             greeting = await workflow.execute_activity(
                 shout,
@@ -57,11 +57,11 @@ class GreetingWorkflow:
 
 @workflow.defn(versioning_behavior=VersioningBehavior.PINNED)
 class SleepyGreetingWorkflow:
-    """Variante avec un ``sleep`` : utile pour montrer le time-skipping en test."""
+    """Variant with a ``sleep``: useful to demonstrate time-skipping in tests."""
 
     @workflow.run
     async def run(self, name: str) -> str:
-        # Un timer d'un jour : sans time-skipping, un test l'attendrait vraiment.
+        # A one-day timer: without time-skipping, a test would really wait for it.
         await workflow.sleep(timedelta(days=1))
         return await workflow.execute_activity(
             compose_greeting,

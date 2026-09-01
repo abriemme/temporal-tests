@@ -1,0 +1,10 @@
+.git
+.venv
+tests
+scripts
+.github
+.context
+__pycache__
+*.pyc
+.pytest_cache
+README.md

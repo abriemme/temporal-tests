@@ -1,6 +1,11 @@
 # temporal-tests
 
-Projet Temporal (Python, géré avec [`uv`](https://docs.astral.sh/uv/)) qui illustre :
+Objectif du projet : **synchroniser les posts Instagram sauvegardés vers
+[Karakeep](https://karakeep.app/)** en s'appuyant sur Temporal pour
+l'orchestration (reprise sur erreur, planification, idempotence).
+
+Le code actuel est le **socle Temporal** (workflow/worker d'exemple) qui
+illustre, en Python géré avec [`uv`](https://docs.astral.sh/uv/) :
 
 - un **worker** utilisant le **Worker Deployment Versioning** avec le **SHA git** comme `build_id` ;
 - un **workflow** d'exemple avec **`workflow.patched`** ;

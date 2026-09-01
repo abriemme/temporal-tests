@@ -1,7 +1,7 @@
 [project]
 name = "provo-v2"
 version = "0.1.0"
-description = "Projet Temporal : Worker Deployment Versioning, workflow.patched, tests time-skipping et replay."
+description = "Synchronise les posts Instagram sauvegardés vers Karakeep via Temporal (Worker Deployment Versioning, workflow.patched, tests time-skipping et replay)."
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [

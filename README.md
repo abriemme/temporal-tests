@@ -1,108 +1,155 @@
-# temporal-tests
+# Instagram → Karakeep, orchestrated with Temporal
 
-Project goal: **sync Instagram saved posts to
-[Karakeep](https://karakeep.app/)**, using Temporal for orchestration (retries,
-scheduling, idempotence).
+[![CI](https://github.com/abriemme/temporal-tests/actions/workflows/ci.yml/badge.svg)](https://github.com/abriemme/temporal-tests/actions/workflows/ci.yml)
+[![Python 3.14](https://img.shields.io/badge/python-3.14-blue)](.python-version)
+[![Temporal](https://img.shields.io/badge/Temporal-Worker%20Versioning-orange)](https://docs.temporal.io/develop/python/worker-versioning)
+[![pydantic-ai](https://img.shields.io/badge/LLM-pydantic--ai-green)](https://ai.pydantic.dev)
 
-The current code is the **Temporal scaffolding** (example workflow/worker) that
-demonstrates, in Python managed with [`uv`](https://docs.astral.sh/uv/):
+A production-grade rewrite of a real automation: every night, the posts saved
+on an Instagram account are turned into enriched bookmarks in
+[Karakeep](https://karakeep.app/). It was previously a Python script driven by
+n8n over HTTP; it is now a **Temporal application** — durable, replayable, and
+testable — with **LLM-powered enrichment** (title, summary, tags, and routing
+into the right Karakeep lists) via [pydantic-ai](https://ai.pydantic.dev).
 
-- a **worker** using **Worker Deployment Versioning** with the **git SHA** as `build_id`;
-- an example **workflow** using **`workflow.patched`**;
-- **activity unit tests** via `ActivityEnvironment` (heartbeats, cancellation);
-- **workflow tests** via `WorkflowEnvironment.start_time_skipping()`, including a
-  variant with **mocked activities**;
-- a **replay test** based on JSON histories in `tests/histories/`;
-- a **GitHub Actions workflow** that runs the tests + replay, then builds a **Docker image tagged with the SHA**.
+## Why Temporal (what the n8n version had to hand-roll)
+
+| Hand-rolled in the n8n script | Temporal primitive |
+|---|---|
+| HTTP endpoint + n8n cron trigger | Schedule (`python -m app.starter schedule`) |
+| `cooldown.json` circuit-breaker on Instagram challenges | `workflow.sleep(cooldown)` timer, survives restarts |
+| Threads + lock to prevent concurrent syncs | one workflow execution at a time, observable in the UI |
+| Manual retry booleans | per-activity `RetryPolicy` + timeouts |
+| `time.sleep` pacing, lost on crash | `workflow.sleep` timers (deterministic, replayable) |
+| "did it work?" status endpoint | workflow result + history in the Temporal UI |
+
+## Architecture
+
+```mermaid
+flowchart LR
+    subgraph Schedule
+        S[Temporal Schedule\nnightly 03:00]
+    end
+    subgraph Worker ["Worker (versioned, build_id = git SHA)"]
+        W[IgSyncWorkflow]
+        A1[fetch_saved]
+        A2[push_to_karakeep]
+        A3[load_seen / save_seen]
+    end
+    IG[Instagram\ninstagrapi session]
+    LLM[LLM agent\npydantic-ai]
+    KK[Karakeep API]
+
+    S --> W
+    W --> A1 --> IG
+    W --> A2 --> LLM
+    A2 --> KK
+    W --> A3 --> F[(seen.json)]
+```
+
+- **Workflow** (`app/sync/workflow.py`) — pure, deterministic orchestration:
+  dedup against the seen-state, oldest-first ordering, pacing timer between
+  pushes, circuit-breaker cooldown when Instagram raises a challenge.
+- **Activities** (`app/sync/activities.py`) — thin Temporal wrappers; all I/O
+  lives in a service layer (`instagram.py`, `karakeep.py`, `state.py`),
+  unit-testable without any worker.
+- **Enrichment** (`app/sync/enrich.py`) — a pydantic-ai agent (GPT-5-mini)
+  turns each caption into a structured `EnrichedBookmark`: a clean title, a
+  summary, up to 3 tags (reusing the caption's hashtags when it has any), and
+  the Karakeep list(s) the post belongs to — chosen from the account's actual
+  lists (fetched once and cached), copied verbatim, and left empty when nothing
+  clearly fits. Transient provider errors are absorbed by the push activity's
+  retry policy.
+
+## Engineering practices
+
+- **Worker Deployment Versioning**: the worker registers with `build_id` = git
+  SHA; each execution stays pinned to its version (`VersioningBehavior.PINNED`).
+- **Tests (24)**: time-skipping workflow tests (`WorkflowEnvironment`), service
+  unit tests, `ActivityEnvironment` tests, and a **replay test** that re-runs a
+  committed JSON history to catch determinism-breaking changes before deploy.
+- **LLM tests without network**: the agent is exercised with pydantic-ai's
+  `TestModel` (structured output, no API key needed).
+- **CI** ([ci.yml](.github/workflows/ci.yml)): ruff lint + format check, then
+  tests + replay, then a Docker image tagged with the SHA, pushed to GHCR.
+- **Unsandboxed workflow runner**: pydantic-ai depends on beartype, which
+  monkey-patches the import machinery and is incompatible with the workflow
+  sandbox; the workflow code stays deterministic, so this is safe (and
+  documented [here](app/worker.py)).
 
 ## Layout
 
 ```
 app/
-  config.py       # deployment_name, task queue, build_id resolution (git SHA)
-  activities.py   # compose_greeting, shout
-  workflows.py    # GreetingWorkflow (workflow.patched), SleepyGreetingWorkflow
-  worker.py       # Worker + WorkerDeploymentConfig (use_worker_versioning=True)
+  config.py            # env-based settings + build_id resolution (git SHA)
+  sync/
+    models.py          # SyncInput/SyncParams/SyncSummary, MediaItem, EnrichedBookmark (no I/O)
+    workflow.py        # IgSyncWorkflow: dedup, ordering, pacing, cooldown timer
+    activities.py      # thin @activity.defn wrappers
+    instagram.py       # instagrapi session + saved-posts fetch (service)
+    karakeep.py        # bookmark creation, payload, list membership (service)
+    enrich.py          # pydantic-ai agent: title/note/tags + list routing (service)
+    state.py           # seen.json dedup state (service)
+  starter.py           # manual sync run + nightly Schedule creation (replaces n8n)
+  worker.py            # versioned worker (use_worker_versioning=True)
 tests/
-  conftest.py     # start_time_skipping() fixture
-  test_activities.py # ActivityEnvironment unit tests (heartbeat, cancellation)
-  test_workflow.py# time-skipping tests + mocked-activities variant
-  test_replay.py  # replays each tests/histories/*.json
-  histories/      # committed JSON histories (generated)
+  conftest.py           # start_time_skipping() fixture
+  test_enrich.py        # pydantic-ai agent tests (TestModel) + list routing
+  test_activities.py    # service-layer unit tests + ActivityEnvironment mechanics
+  test_sync_workflow.py # time-skipping workflow tests (mocked activities)
+  test_replay.py        # replays tests/histories/*.json against current code
 scripts/
-  generate_history.py  # (re)generates the histories
-.github/workflows/ci.yml
-Dockerfile
+  generate_history.py   # (re)generates the replay histories
 ```
 
-## Requirements
+## Quickstart
 
-[`uv`](https://docs.astral.sh/uv/) and Python 3.14 (installed automatically by uv):
+Requires [`uv`](https://docs.astral.sh/uv/) (Python 3.14 installed
+automatically).
 
 ```bash
-uv sync
+uv sync --group ig        # deps incl. instagrapi (worker machine)
+uv run pytest             # 24 tests: unit + time-skipping + replay
 ```
 
-This installs the dependencies (including the `dev` group: pytest,
-pytest-asyncio) from `uv.lock`.
-
-## Run the tests (unit + replay)
+Run against a local Temporal server:
 
 ```bash
-uv run pytest -v
+temporal server start-dev
+GIT_SHA=$(git rev-parse HEAD) uv run python -m app.worker     # worker
+uv run python -m app.starter schedule                        # nightly schedule
+uv run python -m app.starter sync --backfill                 # one-off sync
 ```
 
-Time-skipping and replay automatically download the bundled Temporal **test
-server**: no infrastructure to start.
+Environment:
+
+| Variable | Purpose |
+|---|---|
+| `KARAKEEP_URL`, `KARAKEEP_TOKEN` | Karakeep instance + API token (required) |
+| `KARAKEEP_LIST_ID` | optional list added to *every* bookmark, on top of the classified ones |
+| `DATA_DIR` | `session.json` (instagrapi) and `seen.json` (dedup) |
+| `MAX_ITEMS` | how many recent saved posts to examine per run |
+| `OPENAI_API_KEY` | provider key for the enrichment agent (required) |
+| `ENRICH_MODEL` | override the model (default `openai:gpt-5-mini`) |
+
+Instagram login (once, interactive — produces `DATA_DIR/session.json`):
+`instagrapi` session bootstrap; see `app/sync/instagram.py`.
 
 ## (Re)generate the replay histories
 
-After a *deliberate* and compatible workflow change (e.g. adding a patch),
-regenerate the histories and commit them:
+After a *deliberate*, replay-compatible workflow change:
 
 ```bash
 uv run python scripts/generate_history.py
 ```
 
-The replay test (`test_replay.py`) replays each `tests/histories/*.json` against
-the current code and fails if determinism is broken.
+The replay test fails on any determinism-breaking divergence — before
+anything reaches production.
 
-## Worker Deployment Versioning
-
-The worker (`app/worker.py`) registers under the `deployment_name`
-`greeting-app` with a `build_id` = git SHA:
-
-```python
-WorkerDeploymentConfig(
-    version=WorkerDeploymentVersion(deployment_name="greeting-app", build_id=<git-sha>),
-    use_worker_versioning=True,
-    default_versioning_behavior=VersioningBehavior.PINNED,
-)
-```
-
-Workflows declare `versioning_behavior=VersioningBehavior.PINNED`: each execution
-stays pinned to the version that started it. To drive the traffic ramp between
-versions, use the Temporal CLI/UI (`temporal worker deployment ...`).
-
-Run a worker locally (requires a Temporal server, e.g. `temporal server start-dev`):
+## Docker
 
 ```bash
-GIT_SHA=$(git rev-parse HEAD) uv run python -m app.worker
+docker build --build-arg GIT_SHA=$(git rev-parse HEAD) -t ig-to-karakeep:$(git rev-parse HEAD) .
 ```
 
-## Docker image
-
-```bash
-docker build --build-arg GIT_SHA=$(git rev-parse HEAD) -t greeting-app:$(git rev-parse HEAD) .
-```
-
-The image installs dependencies from `uv.lock`. In CI it is tagged
-`ghcr.io/<repo>:<sha>` (see `.github/workflows/ci.yml`).
-
-## CI
-
-`.github/workflows/ci.yml`:
-
-1. **`test` job**: `uv sync --frozen` then `uv run pytest -v` (time-skipping + replay tests), with `GIT_SHA=github.sha`;
-2. **`docker` job** (depends on `test`): builds the image and tags it `:<github.sha>`,
-   pushing to GHCR on the default branch.
+CI builds and pushes `ghcr.io/<repo>:<sha>` (default branch only).

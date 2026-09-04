@@ -19,14 +19,14 @@ from temporalio.testing import ActivityEnvironment
 import app.sync.instagram as instagram_svc
 import app.sync.karakeep as karakeep_svc
 import app.sync.state as state_svc
-from app.sync.activities import fetch_saved
+from app.sync.activities import fetch_saved_page
 from app.sync.instagram import is_challenge_error
 from app.sync.karakeep import build_payload, create_bookmark, fetch_lists
 from app.sync.models import (
     CHALLENGE_ERROR_TYPE,
     EnrichedBookmark,
+    FetchPageParams,
     MediaItem,
-    SyncParams,
 )
 from app.sync.state import load_seen, save_seen
 
@@ -99,14 +99,14 @@ def test_fetch_lists_parses_and_caches(monkeypatch) -> None:
     assert calls["n"] == 1
 
 
-def test_create_bookmark_unreachable_returns_false(monkeypatch) -> None:
+def test_create_bookmark_unreachable_returns_failed(monkeypatch) -> None:
     monkeypatch.setattr(karakeep_svc, "_lists_cache", [])
 
     def boom(*a, **kw):
         raise requests.RequestException("down")
 
     monkeypatch.setattr("app.sync.karakeep.requests.post", boom)
-    assert create_bookmark(MEDIA, ENRICHMENT) is False
+    assert create_bookmark(MEDIA, ENRICHMENT).status == "failed"
 
 
 def test_create_bookmark_routes_to_classified_lists(monkeypatch) -> None:
@@ -137,7 +137,9 @@ def test_create_bookmark_routes_to_classified_lists(monkeypatch) -> None:
     monkeypatch.setattr("app.sync.karakeep.requests.put", fake_put)
 
     enrichment = EnrichedBookmark(title="t", note="n", tags=[], lists=["Cuisine & Vins"])
-    assert create_bookmark(MEDIA, enrichment) is True
+    outcome = create_bookmark(MEDIA, enrichment)
+    assert outcome.status == "imported"
+    assert outcome.lists == ["Cuisine & Vins"]
     # Only the classified list is targeted (no KARAKEEP_LIST_ID in tests).
     assert len(put_urls) == 1
     assert "/lists/l1/bookmarks/bm-1" in put_urls[0]
@@ -160,15 +162,15 @@ def test_is_challenge_error(message: str, expected: bool) -> None:
 
 
 @pytest.mark.asyncio
-async def test_fetch_saved_wraps_challenge(monkeypatch) -> None:
-    def boom(params):
+async def test_fetch_saved_page_wraps_challenge(monkeypatch) -> None:
+    def boom(**kwargs):
         raise Exception("login_required: checkpoint required")
 
-    monkeypatch.setattr(instagram_svc, "fetch_saved_media", boom)
+    monkeypatch.setattr(instagram_svc, "fetch_saved_page", boom)
 
     env = ActivityEnvironment()
     with pytest.raises(ApplicationError) as exc_info:
-        await env.run(fetch_saved, SyncParams())
+        await env.run(fetch_saved_page, FetchPageParams())
     assert exc_info.value.type == CHALLENGE_ERROR_TYPE
 
 

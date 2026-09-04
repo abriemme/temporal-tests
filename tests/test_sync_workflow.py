@@ -2,7 +2,8 @@
 
 The real activities (instagrapi / Karakeep HTTP calls) are replaced by fakes
 registered under the same activity names: the workflow logic under test is the
-orchestration (dedup, ordering, pacing, cooldown), not the network calls.
+orchestration (dedup, ordering, pacing, cooldown, reconcile), not the network
+calls.
 """
 
 from __future__ import annotations
@@ -27,18 +28,19 @@ class SyncMocks:
     seen: set[str] = field(default_factory=set)
     pushed: list = field(default_factory=list)
     saved_seen: list[list[str]] = field(default_factory=list)
-    push_results: list[bool] = field(default_factory=list)
+    push_results: list[str] = field(default_factory=list)
     challenge_on_fetch: bool = False
 
 
 def _make_activities(mocks: SyncMocks) -> list:
-    @activity.defn(name="fetch_saved")
-    async def fetch_saved(payload) -> list:
+    @activity.defn(name="fetch_saved_page")
+    async def fetch_saved_page(params) -> dict:
         if mocks.challenge_on_fetch:
             from temporalio.exceptions import ApplicationError
 
             raise ApplicationError("Instagram challenge", type=CHALLENGE_TYPE)
-        return mocks.fetched
+        # One page, then stop (empty cursor).
+        return {"items": mocks.fetched, "next_cursor": ""}
 
     @activity.defn(name="load_seen")
     async def load_seen() -> list[str]:
@@ -49,13 +51,12 @@ def _make_activities(mocks: SyncMocks) -> list:
         mocks.saved_seen.append(seen)
 
     @activity.defn(name="push_to_karakeep")
-    async def push_to_karakeep(media) -> bool:
-        mocks.pushed.append(media)
-        if mocks.push_results:
-            return mocks.push_results.pop(0)
-        return True
+    async def push_to_karakeep(params) -> dict:
+        mocks.pushed.append(params["media"])
+        status = mocks.push_results.pop(0) if mocks.push_results else "imported"
+        return {"status": status, "assets": {}, "lists": []}
 
-    return [fetch_saved, load_seen, save_seen, push_to_karakeep]
+    return [fetch_saved_page, load_seen, save_seen, push_to_karakeep]
 
 
 def _media(pk: str, code: str | None = None) -> dict:
@@ -123,7 +124,7 @@ async def test_push_failure_is_counted_and_not_marked_seen(
     mocks = SyncMocks(
         # Instagram returns newest-first: "1" is the oldest of the two.
         fetched=[_media("2"), _media("1")],
-        push_results=[False, True],
+        push_results=["failed", "imported"],
     )
 
     result = await _run(time_skipping_env, mocks)
@@ -132,6 +133,25 @@ async def test_push_failure_is_counted_and_not_marked_seen(
     assert result.failed == 1
     # Only the successful post is persisted as seen.
     assert mocks.saved_seen == [["2"]]
+
+
+@pytest.mark.asyncio
+async def test_reconcile_completes_ignoring_seen_state(
+    time_skipping_env: WorkflowEnvironment,
+) -> None:
+    """Reconcile reprocesses every fetched post, even already-seen ones."""
+    mocks = SyncMocks(
+        fetched=[_media("1")],
+        seen={"1"},  # would be skipped in a normal run
+        push_results=["completed"],
+    )
+
+    result = await _run(time_skipping_env, mocks, reconcile=True)
+
+    assert [m["pk"] for m in mocks.pushed] == ["1"]
+    assert result.completed == 1
+    assert result.imported == 0
+    assert mocks.saved_seen == [["1"]]
 
 
 @pytest.mark.asyncio

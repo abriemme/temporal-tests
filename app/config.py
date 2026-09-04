@@ -32,10 +32,77 @@ KARAKEEP_LIST_ID = os.environ.get("KARAKEEP_LIST_ID", "").strip()
 # rest. Set backfill=True on the workflow input to fetch the whole history.
 MAX_ITEMS = int(os.environ.get("MAX_ITEMS", "40"))
 
+# Guard-rail on a backfill: at most this many pages are walked in one run.
+# The cursor lives in the (durable) workflow state, so a run that hits the cap
+# resumes from where it stopped on the next execution.
+MAX_PAGES = int(os.environ.get("MAX_PAGES", "25"))
+
 # instagrapi session and dedup state. On the NUC (Docker) this is /data.
 DATA_DIR = Path(os.environ.get("DATA_DIR") or "./data")
 SESSION_FILE = DATA_DIR / "session.json"
 STATE_FILE = DATA_DIR / "seen.json"
+COLLECTION_CACHE_FILE = DATA_DIR / "collections.json"
+
+# --- Assets (Instagram CDN -> Karakeep) --------------------------------------
+#
+# Which assets to upload alongside the bookmark. Instagram CDN URLs are signed
+# and expire, so they are only recoverable at import time.
+#   banner     post thumbnail as bannerImage
+#   screenshot post thumbnail as screenshot (replaces Karakeep's login-wall grab)
+#   carousel   every slide of a multi-image post, as userUploaded
+#   video      the Reel's video file
+#   avatar     the author's profile picture
+ASSET_TYPES = [
+    t.strip().lower()
+    for t in os.environ.get("ASSET_TYPES", "banner,screenshot,carousel").split(",")
+    if t.strip()
+]
+
+# Max slides pulled from a carousel; a 20-image post is 20 downloads + uploads.
+MAX_CAROUSEL = int(os.environ.get("MAX_CAROUSEL", "10"))
+
+# Per-file ceiling (MB): above this the asset is skipped rather than saved.
+MAX_ASSET_MB = float(os.environ.get("MAX_ASSET_MB", "50"))
+
+# Overwrite the banner produced by Karakeep's crawler (a login wall on an
+# Instagram URL) with the post thumbnail. Set to False to keep the existing one.
+REPLACE_BANNER = os.environ.get("REPLACE_BANNER", "1") == "1"
+
+# --- Deterministic tags ------------------------------------------------------
+#
+# Tags derived from metadata without an LLM. Comma-separated among:
+# hashtags, author, type, music, location. Empty to disable.
+AUTO_TAGS = [
+    t.strip()
+    for t in os.environ.get(
+        "AUTO_TAGS", "hashtags,author,type,music,location"
+    ).split(",")
+    if t.strip()
+]
+
+# Cap on tags per bookmark (deterministic + LLM tags merged). Instagram posts
+# routinely carry 20-30 hashtags: without a cap the Karakeep tag cloud rots.
+MAX_TAGS = int(os.environ.get("MAX_TAGS", "12"))
+
+# Above this hashtag count the caption is SEO noise, not a description: the
+# hashtags are dropped rather than imported as tags.
+HASHTAG_SPAM_THRESHOLD = int(os.environ.get("HASHTAG_SPAM_THRESHOLD", "20"))
+
+# --- Collections -> Karakeep lists -------------------------------------------
+#
+# Route Instagram collections to Karakeep lists of the same name.
+SYNC_COLLECTIONS = os.environ.get("SYNC_COLLECTIONS", "1") == "1"
+
+# Create the missing Karakeep list when a collection has no match. Off by
+# default: a warning beats a tree polluted with lists created at the root.
+CREATE_MISSING_LISTS = os.environ.get("CREATE_MISSING_LISTS", "0") == "1"
+
+# Posts scanned per collection when membership is not inlined in the feed.
+COLLECTION_SCAN = int(os.environ.get("COLLECTION_SCAN", "60"))
+
+# How long the collection-membership map stays valid (hours). It costs one
+# private-API call PER collection to rebuild, yet barely ever changes. 0 = off.
+COLLECTION_CACHE_HOURS = float(os.environ.get("COLLECTION_CACHE_HOURS", "24"))
 
 
 def get_build_id() -> str:

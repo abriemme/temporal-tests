@@ -27,6 +27,8 @@ from app.config import (
     TEMPORAL_NAMESPACE,
     get_build_id,
 )
+from app.sync_activities import fetch_saved, load_seen, push_to_karakeep, save_seen
+from app.sync_workflow import IgSyncWorkflow
 from app.workflows import GreetingWorkflow, SleepyGreetingWorkflow
 
 
@@ -46,8 +48,8 @@ async def main() -> None:
     worker = Worker(
         client,
         task_queue=TASK_QUEUE,
-        workflows=[GreetingWorkflow, SleepyGreetingWorkflow],
-        activities=[compose_greeting, shout],
+        workflows=[GreetingWorkflow, SleepyGreetingWorkflow, IgSyncWorkflow],
+        activities=[compose_greeting, shout, fetch_saved, load_seen, push_to_karakeep, save_seen],
         deployment_config=WorkerDeploymentConfig(
             version=WorkerDeploymentVersion(
                 deployment_name=DEPLOYMENT_NAME,

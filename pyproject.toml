@@ -6,10 +6,17 @@ readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "pydantic-ai>=2.37.0",
+    "requests>=2.32",
     "temporalio>=1.32.0",
 ]
 
+# Instagram private-API client + TOTP, only needed on the machine that runs
+# the sync activities (worker): `uv sync --group ig`.
 [dependency-groups]
+ig = [
+    "instagrapi>=2.1",
+    "pyotp>=2.9",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",

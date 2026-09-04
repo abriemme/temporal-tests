@@ -4,8 +4,13 @@ Project goal: **sync Instagram saved posts to
 [Karakeep](https://karakeep.app/)**, using Temporal for orchestration (retries,
 scheduling, idempotence).
 
-The current code is the **Temporal scaffolding** (example workflow/worker) that
-demonstrates, in Python managed with [`uv`](https://docs.astral.sh/uv/):
+The current code contains:
+
+- the **actual sync** (`IgSyncWorkflow`): the port of the former n8n-driven
+  `ig_to_karakeep.py` script — Instagram saved posts -> Karakeep bookmarks,
+  orchestrated by Temporal (activities, retries, timers, dedup state);
+- **Temporal scaffolding** (example workflow/worker) that
+  demonstrates, in Python managed with [`uv`](https://docs.astral.sh/uv/):
 
 - a **worker** using **Worker Deployment Versioning** with the **git SHA** as `build_id`;
 - an example **workflow** using **`workflow.patched`**;
@@ -20,6 +25,9 @@ app/
   config.py       # deployment_name, task queue, build_id resolution (git SHA)
   activities.py   # compose_greeting, shout
   workflows.py    # GreetingWorkflow (workflow.patched), SleepyGreetingWorkflow
+  sync_workflow.py     # IgSyncWorkflow: dedup, ordering, pacing, cooldown timer
+  sync_activities.py   # fetch_saved / push_to_karakeep / load_seen / save_seen
+  starter.py           # manual sync run + nightly Schedule creation (replaces n8n)
   worker.py       # Worker + WorkerDeploymentConfig (use_worker_versioning=True)
 tests/
   conftest.py     # start_time_skipping() fixture
@@ -63,6 +71,25 @@ uv run python scripts/generate_history.py
 
 The replay test (`test_replay.py`) replays each `tests/histories/*.json` against
 the current code and fails if determinism is broken.
+
+## Instagram -> Karakeep sync
+
+What replaced the n8n machinery:
+
+| Old (n8n script) | New |
+|---|---|
+| HTTP endpoint + n8n cron | Temporal Schedule (`uv run python -m app.starter schedule`) or manual `... starter sync [--backfill]` |
+| `cooldown.json` circuit breaker | `workflow.sleep(cooldown_hours)` timer when the activity raises a `ChallengeDetected` `ApplicationError` |
+| manual retry/bool bookkeeping | activity `RetryPolicy` + timeouts |
+| `time.sleep` pacing | `workflow.sleep` (deterministic, replayable) |
+
+Still needed (unchanged): `instagrapi` session (`DATA_DIR/session.json`,
+produced by the interactive login CLI — to be ported), dedup state
+(`DATA_DIR/seen.json`), and the `ig` optional dependency group on the worker
+machine: `uv sync --group ig`.
+
+Environment: `KARAKEEP_URL`, `KARAKEEP_TOKEN`, `KARAKEEP_LIST_ID` (optional),
+`MAX_ITEMS`, `DATA_DIR`.
 
 ## Worker Deployment Versioning
 

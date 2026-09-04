@@ -19,7 +19,7 @@ import pytest
 from temporalio.client import WorkflowHistory
 from temporalio.worker import Replayer
 
-from app.workflows import GreetingWorkflow, SleepyGreetingWorkflow
+from app.sync_workflow import IgSyncWorkflow
 
 HISTORIES_DIR = Path(__file__).parent / "histories"
 
@@ -42,7 +42,7 @@ async def test_replay_history(history_path: Path) -> None:
         history=json.loads(history_path.read_text()),
     )
 
-    replayer = Replayer(workflows=[GreetingWorkflow, SleepyGreetingWorkflow])
+    replayer = Replayer(workflows=[IgSyncWorkflow])
     # Raises NondeterminismError if the current code diverges from the history.
     await replayer.replay_workflow(history)
 

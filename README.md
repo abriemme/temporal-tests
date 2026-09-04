@@ -4,16 +4,12 @@ Project goal: **sync Instagram saved posts to
 [Karakeep](https://karakeep.app/)**, using Temporal for orchestration (retries,
 scheduling, idempotence).
 
-The current code contains:
-
-- the **actual sync** (`IgSyncWorkflow`): the port of the former n8n-driven
-  `ig_to_karakeep.py` script — Instagram saved posts -> Karakeep bookmarks,
-  orchestrated by Temporal (activities, retries, timers, dedup state);
-- **Temporal scaffolding** (example workflow/worker) that
-  demonstrates, in Python managed with [`uv`](https://docs.astral.sh/uv/):
+The project is the **actual sync** (`IgSyncWorkflow`): the port of the former
+n8n-driven `ig_to_karakeep.py` script — Instagram saved posts -> Karakeep
+bookmarks, orchestrated by Temporal (activities, retries, timers, dedup state).
+Built in Python managed with [`uv`](https://docs.astral.sh/uv/):
 
 - a **worker** using **Worker Deployment Versioning** with the **git SHA** as `build_id`;
-- an example **workflow** using **`workflow.patched`**;
 - **tests** via `WorkflowEnvironment.start_time_skipping()`;
 - a **replay test** based on JSON histories in `tests/histories/`;
 - a **GitHub Actions workflow** that runs the tests + replay, then builds a **Docker image tagged with the SHA**.
@@ -22,18 +18,17 @@ The current code contains:
 
 ```
 app/
-  config.py       # deployment_name, task queue, build_id resolution (git SHA)
-  activities.py   # compose_greeting, shout
-  workflows.py    # GreetingWorkflow (workflow.patched), SleepyGreetingWorkflow
+  config.py       # deployment_name, task queue, build_id resolution (git SHA),
+                  # Karakeep/Instagram settings, DATA_DIR paths
   sync_workflow.py     # IgSyncWorkflow: dedup, ordering, pacing, cooldown timer
   sync_activities.py   # fetch_saved / push_to_karakeep / load_seen / save_seen
   starter.py           # manual sync run + nightly Schedule creation (replaces n8n)
   worker.py       # Worker + WorkerDeploymentConfig (use_worker_versioning=True)
 tests/
-  conftest.py     # start_time_skipping() fixture
-  test_workflow.py# time-skipping tests
-  test_replay.py  # replays each tests/histories/*.json
-  histories/      # committed JSON histories (generated)
+  conftest.py          # start_time_skipping() fixture
+  test_sync_workflow.py# time-skipping tests
+  test_replay.py       # replays each tests/histories/*.json
+  histories/           # committed JSON histories (generated)
 scripts/
   generate_history.py  # (re)generates the histories
 .github/workflows/ci.yml
@@ -94,11 +89,11 @@ Environment: `KARAKEEP_URL`, `KARAKEEP_TOKEN`, `KARAKEEP_LIST_ID` (optional),
 ## Worker Deployment Versioning
 
 The worker (`app/worker.py`) registers under the `deployment_name`
-`greeting-app` with a `build_id` = git SHA:
+`ig-to-karakeep` with a `build_id` = git SHA:
 
 ```python
 WorkerDeploymentConfig(
-    version=WorkerDeploymentVersion(deployment_name="greeting-app", build_id=<git-sha>),
+    version=WorkerDeploymentVersion(deployment_name="ig-to-karakeep", build_id=<git-sha>),
     use_worker_versioning=True,
     default_versioning_behavior=VersioningBehavior.PINNED,
 )
@@ -117,7 +112,7 @@ GIT_SHA=$(git rev-parse HEAD) uv run python -m app.worker
 ## Docker image
 
 ```bash
-docker build --build-arg GIT_SHA=$(git rev-parse HEAD) -t greeting-app:$(git rev-parse HEAD) .
+docker build --build-arg GIT_SHA=$(git rev-parse HEAD) -t ig-to-karakeep:$(git rev-parse HEAD) .
 ```
 
 The image installs dependencies from `uv.lock`. In CI it is tagged

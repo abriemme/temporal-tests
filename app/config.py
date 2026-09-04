@@ -13,10 +13,10 @@ from pathlib import Path
 
 # Logical name of the worker deployment. It must stay stable over time: it is
 # the identity under which all versions (build_ids) succeed one another.
-DEPLOYMENT_NAME = "greeting-app"
+DEPLOYMENT_NAME = "ig-to-karakeep"
 
 # Task queue used by the worker and the clients.
-TASK_QUEUE = "greeting-task-queue"
+TASK_QUEUE = "ig-sync-task-queue"
 
 # Temporal server address (overridden in prod via the environment).
 TEMPORAL_ADDRESS = os.environ.get("TEMPORAL_ADDRESS", "localhost:7233")

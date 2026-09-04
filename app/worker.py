@@ -19,7 +19,6 @@ from temporalio.worker import (
     WorkerDeploymentVersion,
 )
 
-from app.activities import compose_greeting, shout
 from app.config import (
     DEPLOYMENT_NAME,
     TASK_QUEUE,
@@ -29,7 +28,6 @@ from app.config import (
 )
 from app.sync_activities import fetch_saved, load_seen, push_to_karakeep, save_seen
 from app.sync_workflow import IgSyncWorkflow
-from app.workflows import GreetingWorkflow, SleepyGreetingWorkflow
 
 
 async def main() -> None:
@@ -48,8 +46,8 @@ async def main() -> None:
     worker = Worker(
         client,
         task_queue=TASK_QUEUE,
-        workflows=[GreetingWorkflow, SleepyGreetingWorkflow, IgSyncWorkflow],
-        activities=[compose_greeting, shout, fetch_saved, load_seen, push_to_karakeep, save_seen],
+        workflows=[IgSyncWorkflow],
+        activities=[fetch_saved, load_seen, push_to_karakeep, save_seen],
         deployment_config=WorkerDeploymentConfig(
             version=WorkerDeploymentVersion(
                 deployment_name=DEPLOYMENT_NAME,

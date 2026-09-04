@@ -1,8 +1,7 @@
 """Start a sync manually or (re)create the nightly schedule.
 
-Replaces both n8n triggers of the old script:
-- the nightly cron  -> Temporal Schedule;
-- the ``POST /sync`` HTTP endpoint -> ``uv run python -m app.starter sync``.
+Replaces the n8n triggers of the old script: the nightly cron becomes a
+Temporal Schedule, and a manual run is one command instead of an HTTP call.
 """
 
 from __future__ import annotations

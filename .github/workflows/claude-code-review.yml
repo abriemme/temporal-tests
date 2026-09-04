@@ -1,0 +1,51 @@
+name: Claude Code Review
+
+# Automatically ask Claude to review every pull request.
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  claude-review:
+    name: Review with Claude
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code Review
+        uses: anthropics/claude-code-action@v1
+        with:
+          # Uses a Claude subscription (Pro/Max) via OAuth token instead of a
+          # pay-as-you-go API key. Generate it locally with `claude setup-token`
+          # and store it as the CLAUDE_CODE_OAUTH_TOKEN repository secret.
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            Review this pull request and leave inline comments where useful.
+            This is a Python + Temporal project (Instagram -> Karakeep sync).
+            Focus on:
+            - Correctness bugs and edge cases
+            - Temporal-specific pitfalls (non-determinism in workflows,
+              activity vs workflow boundaries, retry/idempotency)
+            - Security issues (secret handling, input validation)
+            - Test coverage gaps
+
+            Be concise. Only flag real issues; do not comment on style that
+            `ruff` already enforces. Use inline comments for specific lines and
+            a short summary comment for the overall assessment.
+          # Allow Claude to read the diff and post inline review comments.
+          claude_args: |
+            --allowed-tools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr diff:*),Bash(gh pr view:*)"

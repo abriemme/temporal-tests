@@ -23,6 +23,7 @@ dev = [
     "pre-commit>=4.0",
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
+    "pytest-cov>=5.0",
     "ruff>=0.8",
 ]
 
@@ -53,6 +54,20 @@ known-first-party = ["app"]
 asyncio_mode = "strict"
 pythonpath = ["."]
 testpaths = ["tests"]
+# Coverage runs on every `pytest` invocation (local and CI) so the threshold
+# below gates the same way everywhere.
+addopts = "--cov=app --cov-report=term-missing --cov-report=xml"
+
+[tool.coverage.run]
+branch = true
+source = ["app"]
+
+[tool.coverage.report]
+show_missing = true
+# Floor for the whole package. Domain logic (config, activities, karakeep,
+# models, state) is at 100%; the remaining gap is process bootstrap
+# (worker.py / starter.py) exercised end-to-end rather than in unit tests.
+fail_under = 75
 
 [tool.setuptools]
 packages = ["app"]

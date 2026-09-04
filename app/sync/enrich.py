@@ -82,6 +82,6 @@ async def enrich_media(media: MediaItem, agent=None) -> Enrichment:
                 note=out.note[:NOTE_MAX],
                 tags=[t.strip().lower() for t in out.tags if t.strip()][:3],
             )
-        except Exception:  # noqa: BLE001 - enrichment must never break the sync
+        except Exception:
             pass
     return heuristic_enrichment(media)

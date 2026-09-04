@@ -11,7 +11,6 @@ import pytest
 from pydantic_ai import Agent
 from pydantic_ai.models.test import TestModel
 
-import app.sync.enrich as enrich_svc
 from app.sync.enrich import Enrichment, enrich_media, heuristic_enrichment
 from app.sync.models import MediaItem
 

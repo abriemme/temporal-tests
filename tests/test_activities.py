@@ -84,7 +84,9 @@ def test_create_bookmark_success(monkeypatch) -> None:
         def json(self):
             return {"id": "bm-1"}
 
-    monkeypatch.setattr("app.sync.karakeep.requests.post", lambda *a, **kw: FakeResponse())
+    monkeypatch.setattr(
+        "app.sync.karakeep.requests.post", lambda *a, **kw: FakeResponse()
+    )
     assert create_bookmark(MEDIA) is True
 
 

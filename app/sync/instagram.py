@@ -32,9 +32,7 @@ def get_client():
     # automation signal.
     cl.delay_range = [4, 10]
     if not SESSION_FILE.exists():
-        raise RuntimeError(
-            f"No session in {SESSION_FILE}. Run the login CLI first."
-        )
+        raise RuntimeError(f"No session in {SESSION_FILE}. Run the login CLI first.")
     cl.load_settings(SESSION_FILE)
     return cl
 
@@ -45,7 +43,7 @@ def fetch_saved_media(params: SyncParams) -> list[MediaItem]:
     try:
         amount = 0 if params.backfill else params.max_items  # 0 = all
         medias = cl.collection_medias("ALL_MEDIA_AUTO_COLLECTION", amount=amount)
-    except Exception as exc:
+    except Exception:
         # Bubble the original error up; the activity layer decides whether it
         # is a challenge and wraps it accordingly.
         raise

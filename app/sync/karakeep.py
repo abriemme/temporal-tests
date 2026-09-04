@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+
 import requests
 
 from app.config import KARAKEEP_LIST_ID, KARAKEEP_TOKEN, KARAKEEP_URL
@@ -65,10 +67,8 @@ def create_bookmark(media: MediaItem, enrichment: Enrichment | None = None) -> b
 
     bookmark_id = r.json().get("id")
     if bookmark_id and KARAKEEP_LIST_ID:
-        try:
+        # The bookmark exists; failing the whole push because of the list
+        # would duplicate it on retry.
+        with contextlib.suppress(OSError):
             _add_to_list(bookmark_id)
-        except OSError:
-            # The bookmark exists; failing the whole push because of the list
-            # would duplicate it on retry.
-            pass
     return True

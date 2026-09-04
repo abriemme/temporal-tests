@@ -16,8 +16,10 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 
 # Dependency layer, cached as long as pyproject.toml/uv.lock don't change.
+# The "ig" group (instagrapi, pyotp) is needed at runtime: the worker executes
+# the Instagram activities in-process.
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project
+RUN uv sync --frozen --no-dev --no-install-project --group ig
 
 COPY app ./app
 

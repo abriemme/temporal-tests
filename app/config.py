@@ -56,5 +56,5 @@ def get_build_id() -> str:
             stderr=subprocess.DEVNULL,
         )
         return sha.decode().strip()
-    except (subprocess.CalledProcessError, FileNotFoundError):
+    except subprocess.CalledProcessError, FileNotFoundError:
         return "unknown"

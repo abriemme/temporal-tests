@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 import pytest
 from temporalio import activity
 from temporalio.testing import WorkflowEnvironment
-from temporalio.worker import Worker
+from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
 from app.config import TASK_QUEUE
 from app.sync import IgSyncWorkflow, SyncInput
@@ -37,9 +37,7 @@ def _make_activities(mocks: SyncMocks) -> list:
         if mocks.challenge_on_fetch:
             from temporalio.exceptions import ApplicationError
 
-            raise ApplicationError(
-                "Instagram challenge", type=CHALLENGE_TYPE
-            )
+            raise ApplicationError("Instagram challenge", type=CHALLENGE_TYPE)
         return mocks.fetched
 
     @activity.defn(name="load_seen")
@@ -60,7 +58,7 @@ def _make_activities(mocks: SyncMocks) -> list:
     return [fetch_saved, load_seen, save_seen, push_to_karakeep]
 
 
-def _media(pk: str, code: str = None) -> dict:
+def _media(pk: str, code: str | None = None) -> dict:
     return {
         "pk": pk,
         "code": code or f"c{pk}",
@@ -75,6 +73,7 @@ async def _run(env: WorkflowEnvironment, mocks: SyncMocks, **input_kwargs):
         task_queue=TASK_QUEUE,
         workflows=[IgSyncWorkflow],
         activities=_make_activities(mocks),
+        workflow_runner=UnsandboxedWorkflowRunner(),
     ):
         return await env.client.execute_workflow(
             IgSyncWorkflow.run,

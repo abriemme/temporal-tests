@@ -14,6 +14,7 @@ import logging
 from temporalio.client import Client
 from temporalio.common import VersioningBehavior
 from temporalio.worker import (
+    UnsandboxedWorkflowRunner,
     Worker,
     WorkerDeploymentConfig,
     WorkerDeploymentVersion,
@@ -53,6 +54,12 @@ async def main() -> None:
         task_queue=TASK_QUEUE,
         workflows=[IgSyncWorkflow],
         activities=[fetch_saved, load_seen, push_to_karakeep, save_seen],
+        # pydantic-ai (LLM enrichment in the push activity) relies on
+        # beartype, which monkey-patches the import machinery and is
+        # incompatible with the workflow sandbox. The workflow code itself
+        # stays deterministic (no I/O, no wall-clock), so running it
+        # unsandboxed is safe.
+        workflow_runner=UnsandboxedWorkflowRunner(),
         deployment_config=WorkerDeploymentConfig(
             version=WorkerDeploymentVersion(
                 deployment_name=DEPLOYMENT_NAME,

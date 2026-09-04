@@ -10,6 +10,7 @@ from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
 from app.sync import instagram, karakeep, state
+from app.sync.enrich import enrich_media
 from app.sync.instagram import is_challenge_error
 from app.sync.models import CHALLENGE_ERROR_TYPE, MediaItem, SyncParams
 
@@ -30,7 +31,10 @@ async def fetch_saved(params: SyncParams) -> list[MediaItem]:
 @activity.defn
 async def push_to_karakeep(media: MediaItem) -> bool:
     """Create the bookmark (and add it to the list if configured)."""
-    pushed = karakeep.create_bookmark(media)
+    # Enrichment is LLM-powered (pydantic-ai) but never fails the push: it
+    # falls back to a heuristic internally.
+    enrichment = await enrich_media(media)
+    pushed = karakeep.create_bookmark(media, enrichment=enrichment)
     if pushed:
         activity.logger.info("+ https://www.instagram.com/p/%s/", media.code)
     else:

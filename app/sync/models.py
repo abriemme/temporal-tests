@@ -33,6 +33,15 @@ class SyncInput:
 
 
 @dataclass
+class Enrichment:
+    """Structured LLM output for one Instagram post (title, summary, tags)."""
+
+    title: str
+    note: str
+    tags: list[str]
+
+
+@dataclass
 class MediaItem:
     """One Instagram saved post, flattened for serialization."""
 

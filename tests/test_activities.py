@@ -21,7 +21,7 @@ import app.sync.state as state_svc
 from app.sync.activities import fetch_saved
 from app.sync.instagram import is_challenge_error
 from app.sync.karakeep import build_payload, create_bookmark
-from app.sync.models import CHALLENGE_ERROR_TYPE, MediaItem, SyncParams
+from app.sync.models import CHALLENGE_ERROR_TYPE, Enrichment, MediaItem, SyncParams
 from app.sync.state import load_seen, save_seen
 
 MEDIA = MediaItem(pk="1", code="abc", username="someone", caption="line1\nline2")
@@ -50,12 +50,23 @@ def test_load_seen_missing_or_corrupt_file(tmp_path, monkeypatch) -> None:
 # --- Karakeep -----------------------------------------------------------------
 
 
-def test_build_payload_injects_title_and_note() -> None:
+def test_build_payload_heuristic_without_enrichment() -> None:
     payload = build_payload(MEDIA)
     assert payload["type"] == "link"
     assert payload["url"] == "https://www.instagram.com/p/abc/"
     assert payload["title"] == "@someone — line1"
     assert payload["note"] == "line1\nline2"
+    assert payload["tags"] == []
+
+
+def test_build_payload_uses_llm_enrichment() -> None:
+    enrichment = Enrichment(
+        title="A great recipe", note="Pancakes, step by step", tags=["Food", " Baking "]
+    )
+    payload = build_payload(MEDIA, enrichment=enrichment)
+    assert payload["title"] == "A great recipe"
+    assert payload["note"] == "Pancakes, step by step"
+    assert payload["tags"] == ["food", "baking"]
 
 
 def test_create_bookmark_unreachable_returns_false(monkeypatch) -> None:

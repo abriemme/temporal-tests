@@ -5,7 +5,8 @@ from __future__ import annotations
 import requests
 
 from app.config import KARAKEEP_LIST_ID, KARAKEEP_TOKEN, KARAKEEP_URL
-from app.sync.models import MediaItem
+from app.sync.enrich import NOTE_MAX, TITLE_MAX, heuristic_enrichment
+from app.sync.models import Enrichment, MediaItem
 
 TIMEOUT = 30
 
@@ -17,18 +18,20 @@ def _headers() -> dict:
     }
 
 
-def build_payload(media: MediaItem) -> dict:
-    """Karakeep cannot crawl Instagram: we provide title and note ourselves."""
-    url = f"https://www.instagram.com/p/{media.code}/"
-    title = f"@{media.username}"
-    first_line = media.caption.splitlines()[0] if media.caption else ""
-    if first_line:
-        title += f" — {first_line[:90]}"
+def build_payload(media: MediaItem, enrichment: Enrichment | None = None) -> dict:
+    """Build the bookmark payload; Karakeep cannot crawl Instagram itself.
 
-    payload = {"type": "link", "url": url, "title": title[:250]}
-    if media.caption:
-        payload["note"] = media.caption[:4000]
-    return payload
+    ``enrichment`` (typically LLM-generated, see app.sync.enrich) provides the
+    title/summary/tags; without it a deterministic heuristic is used.
+    """
+    e = enrichment or heuristic_enrichment(media)
+    return {
+        "type": "link",
+        "url": f"https://www.instagram.com/p/{media.code}/",
+        "title": e.title[:TITLE_MAX],
+        "note": e.note[:NOTE_MAX],
+        "tags": [t.strip().lower() for t in e.tags if t.strip()][:3],
+    }
 
 
 def _add_to_list(bookmark_id: str) -> None:
@@ -44,9 +47,9 @@ def _add_to_list(bookmark_id: str) -> None:
         raise OSError(f"list add failed: {exc}") from exc
 
 
-def create_bookmark(media: MediaItem) -> bool:
+def create_bookmark(media: MediaItem, enrichment: Enrichment | None = None) -> bool:
     """Create the bookmark; returns False on failure (caller counts it)."""
-    payload = build_payload(media)
+    payload = build_payload(media, enrichment=enrichment)
     try:
         r = requests.post(
             f"{KARAKEEP_URL}/api/v1/bookmarks",

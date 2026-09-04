@@ -10,7 +10,9 @@ bookmarks, orchestrated by Temporal (activities, retries, timers, dedup state).
 Built in Python managed with [`uv`](https://docs.astral.sh/uv/):
 
 - a **worker** using **Worker Deployment Versioning** with the **git SHA** as `build_id`;
-- **tests** via `WorkflowEnvironment.start_time_skipping()`;
+- **activity unit tests** via `ActivityEnvironment` (heartbeats, cancellation);
+- **workflow tests** via `WorkflowEnvironment.start_time_skipping()`, with
+  **mocked activities**;
 - a **replay test** based on JSON histories in `tests/histories/`;
 - a **GitHub Actions workflow** that runs the tests + replay, then builds a **Docker image tagged with the SHA**.
 
@@ -26,7 +28,8 @@ app/
   worker.py       # Worker + WorkerDeploymentConfig (use_worker_versioning=True)
 tests/
   conftest.py          # start_time_skipping() fixture
-  test_sync_workflow.py# time-skipping tests
+  test_activities.py   # ActivityEnvironment unit tests (heartbeat, cancellation)
+  test_sync_workflow.py# time-skipping tests (mocked activities)
   test_replay.py       # replays each tests/histories/*.json
   histories/           # committed JSON histories (generated)
 scripts/

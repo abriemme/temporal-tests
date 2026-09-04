@@ -5,3 +5,4 @@ __pycache__/
 .context/
 *.egg-info/
 .mypy_cache/
+graphify-out/

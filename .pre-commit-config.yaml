@@ -1,0 +1,8 @@
+# Local ruff gate: run `pre-commit install` once, then every commit is blocked
+# unless `ruff check` and `ruff format --check` pass. Mirrors the CI lint job.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.6
+    hooks:
+      - id: ruff-check
+      - id: ruff-format

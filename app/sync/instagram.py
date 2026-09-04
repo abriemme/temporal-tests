@@ -145,9 +145,7 @@ def _names_by_id(cl) -> dict[str, str]:
         return _collection_names_by_id
     try:
         _collection_names_by_id = {
-            str(c.id): c.name
-            for c in cl.collections()
-            if str(c.id) != SAVED_COLLECTION
+            str(c.id): c.name for c in cl.collections() if str(c.id) != SAVED_COLLECTION
         }
     except Exception:
         _collection_names_by_id = {}
@@ -160,7 +158,7 @@ def _load_collection_cache() -> dict[str, set[str]] | None:
     try:
         data = json.loads(COLLECTION_CACHE_FILE.read_text())
         age = time.time() - data["fetched_at"]
-    except (json.JSONDecodeError, KeyError, TypeError):
+    except json.JSONDecodeError, KeyError, TypeError:
         return None
     if age > COLLECTION_CACHE_HOURS * 3600:
         return None

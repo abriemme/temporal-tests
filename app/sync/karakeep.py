@@ -54,7 +54,7 @@ def _raw_lists(*, force: bool = False) -> list[dict]:
         payload = r.json()
         raw = payload.get("lists", []) if isinstance(payload, dict) else payload
         _lists_cache = [{"id": item["id"], "name": item["name"]} for item in raw]
-    except (requests.RequestException, ValueError, KeyError, TypeError):
+    except requests.RequestException, ValueError, KeyError, TypeError:
         _lists_cache = []
     return _lists_cache
 

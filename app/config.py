@@ -74,9 +74,7 @@ REPLACE_BANNER = os.environ.get("REPLACE_BANNER", "1") == "1"
 # hashtags, author, type, music, location. Empty to disable.
 AUTO_TAGS = [
     t.strip()
-    for t in os.environ.get(
-        "AUTO_TAGS", "hashtags,author,type,music,location"
-    ).split(",")
+    for t in os.environ.get("AUTO_TAGS", "hashtags,author,type,music,location").split(",")
     if t.strip()
 ]
 

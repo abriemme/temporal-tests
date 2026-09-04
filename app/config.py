@@ -38,31 +38,6 @@ SESSION_FILE = DATA_DIR / "session.json"
 STATE_FILE = DATA_DIR / "seen.json"
 
 
-def get_instagram_client():
-    """Load the persisted instagrapi session (login is a separate CLI step).
-
-    instagrapi is an optional dependency (group "ig"): import it lazily so the
-    worker (and the tests) don't require it.
-    """
-    try:
-        from instagrapi import Client
-    except ImportError as exc:  # pragma: no cover
-        raise RuntimeError(
-            "instagrapi is not installed. Run `uv sync --group ig`."
-        ) from exc
-
-    cl = Client()
-    # Space out private-API calls; a request burst is the most obvious
-    # automation signal.
-    cl.delay_range = [4, 10]
-    if not SESSION_FILE.exists():
-        raise RuntimeError(
-            f"No session in {SESSION_FILE}. Run the login CLI first."
-        )
-    cl.load_settings(SESSION_FILE)
-    return cl
-
-
 def get_build_id() -> str:
     """Return the git SHA to use as the ``build_id`` of the worker version.
 

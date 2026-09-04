@@ -20,15 +20,21 @@ Built in Python managed with [`uv`](https://docs.astral.sh/uv/):
 
 ```
 app/
-  config.py       # deployment_name, task queue, build_id resolution (git SHA),
-                  # Karakeep/Instagram settings, DATA_DIR paths
-  sync_workflow.py     # IgSyncWorkflow: dedup, ordering, pacing, cooldown timer
-  sync_activities.py   # fetch_saved / push_to_karakeep / load_seen / save_seen
+  config.py            # all env-based settings (Temporal, Karakeep, DATA_DIR)
+                       # + build_id resolution (git SHA)
+  sync/
+    models.py          # SyncInput/SyncParams/SyncSummary, MediaItem (no I/O)
+    workflow.py        # IgSyncWorkflow: dedup, ordering, pacing, cooldown timer
+    activities.py      # thin @activity.defn wrappers
+    instagram.py       # instagrapi session + saved-posts fetch (service)
+    karakeep.py        # bookmark creation, payload, list membership (service)
+    state.py           # seen.json dedup state (service)
+    __init__.py        # lazy re-exports (sandbox-safe)
   starter.py           # manual sync run + nightly Schedule creation (replaces n8n)
-  worker.py       # Worker + WorkerDeploymentConfig (use_worker_versioning=True)
+  worker.py            # Worker + WorkerDeploymentConfig (use_worker_versioning=True)
 tests/
   conftest.py          # start_time_skipping() fixture
-  test_activities.py   # ActivityEnvironment unit tests (heartbeat, cancellation)
+  test_activities.py   # service-layer unit tests + ActivityEnvironment mechanics
   test_sync_workflow.py# time-skipping tests (mocked activities)
   test_replay.py       # replays each tests/histories/*.json
   histories/           # committed JSON histories (generated)

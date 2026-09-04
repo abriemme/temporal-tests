@@ -7,7 +7,6 @@ orchestration: activities + timers, persisted and replayable by Temporal.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import timedelta
 
 from temporalio import workflow
@@ -15,34 +14,18 @@ from temporalio.common import RetryPolicy
 from temporalio.exceptions import ActivityError, ApplicationError
 
 with workflow.unsafe.imports_passed_through():
-    from app.sync_activities import (
+    from app.sync.activities import fetch_saved, load_seen, push_to_karakeep, save_seen
+    from app.sync.models import (
         CHALLENGE_ERROR_TYPE,
         MediaItem,
+        SyncInput,
         SyncParams,
-        fetch_saved,
-        load_seen,
-        push_to_karakeep,
-        save_seen,
+        SyncSummary,
     )
 
 # Pacing between two Karakeep pushes. Must be deterministic (no random in a
 # workflow).
 PUSH_DELAY = timedelta(seconds=2)
-
-
-@dataclass
-class SyncInput:
-    backfill: bool = False
-    max_items: int = 40
-    cooldown_hours: float = 24.0
-
-
-@dataclass
-class SyncSummary:
-    status: str  # "ok" | "cooldown"
-    fetched: int = 0
-    imported: int = 0
-    failed: int = 0
 
 
 def _is_challenge(exc: Exception) -> bool:
@@ -70,8 +53,6 @@ class IgSyncWorkflow:
                 fetch_saved,
                 SyncParams(backfill=params.backfill, max_items=params.max_items),
                 start_to_close_timeout=timedelta(minutes=10),
-                # Never retry an Instagram challenge automatically: hammering
-                # a limited account only makes the block worse.
                 retry_policy=RetryPolicy(maximum_attempts=1),
             )
         except ActivityError as exc:

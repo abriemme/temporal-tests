@@ -19,7 +19,7 @@ import pytest
 from temporalio.client import WorkflowHistory
 from temporalio.worker import Replayer
 
-from app.sync_workflow import IgSyncWorkflow
+from app.sync import IgSyncWorkflow
 
 HISTORIES_DIR = Path(__file__).parent / "histories"
 

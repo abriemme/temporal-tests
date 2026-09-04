@@ -19,7 +19,7 @@ from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
 from app.config import TASK_QUEUE
-from app.sync_workflow import IgSyncWorkflow, SyncInput
+from app.sync import IgSyncWorkflow, SyncInput
 
 HISTORIES_DIR = Path(__file__).resolve().parents[1] / "tests" / "histories"
 

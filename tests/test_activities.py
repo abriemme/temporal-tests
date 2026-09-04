@@ -1,11 +1,8 @@
-"""Activity unit tests using ``ActivityEnvironment``.
+"""Unit tests for the sync service layer (state, karakeep, instagram).
 
-``ActivityEnvironment`` runs an activity function directly, outside of any
-worker or workflow, while still providing a valid ``activity`` context (logger,
-``activity.info()``, heartbeats, cancellation). This is the fast, isolated way
-to test the business logic of an activity.
-
-See https://docs.temporal.io/develop/python/best-practices/testing-suite.
+Service functions are tested directly (no worker, no workflow); activity-level
+behavior (challenge wrapping, heartbeats, cancellation) is tested through
+``ActivityEnvironment``.
 """
 
 from __future__ import annotations
@@ -16,61 +13,100 @@ import json
 import pytest
 import requests
 from temporalio import activity
+from temporalio.exceptions import ApplicationError
 from temporalio.testing import ActivityEnvironment
 
-import app.sync_activities as sync_activities
-from app.sync_activities import (
-    MediaItem,
-    _build_payload,
-    load_seen,
-    push_to_karakeep,
-    save_seen,
-)
+import app.sync.instagram as instagram_svc
+import app.sync.state as state_svc
+from app.sync.activities import fetch_saved
+from app.sync.instagram import is_challenge_error
+from app.sync.karakeep import build_payload, create_bookmark
+from app.sync.models import CHALLENGE_ERROR_TYPE, MediaItem, SyncParams
+from app.sync.state import load_seen, save_seen
+
+MEDIA = MediaItem(pk="1", code="abc", username="someone", caption="line1\nline2")
 
 
-@pytest.mark.asyncio
-async def test_seen_roundtrip(tmp_path, monkeypatch) -> None:
-    """save_seen then load_seen returns the persisted set, sorted."""
-    monkeypatch.setattr(sync_activities, "STATE_FILE", tmp_path / "seen.json")
+# --- Seen-state ---------------------------------------------------------------
 
-    env = ActivityEnvironment()
-    await env.run(save_seen, ["2", "1"])
-    assert await env.run(load_seen) == ["1", "2"]
+
+def test_seen_roundtrip(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(state_svc, "STATE_FILE", tmp_path / "seen.json")
+
+    save_seen(["2", "1"])
+    assert load_seen() == ["1", "2"]
     assert json.loads((tmp_path / "seen.json").read_text()) == ["1", "2"]
 
 
-@pytest.mark.asyncio
-async def test_load_seen_missing_or_corrupt_file(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(sync_activities, "STATE_FILE", tmp_path / "seen.json")
-    env = ActivityEnvironment()
+def test_load_seen_missing_or_corrupt_file(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(state_svc, "STATE_FILE", tmp_path / "seen.json")
 
-    assert await env.run(load_seen) == []  # no file yet
+    assert load_seen() == []  # no file yet
 
     (tmp_path / "seen.json").write_text("not json")
-    assert await env.run(load_seen) == []  # unreadable -> start fresh
+    assert load_seen() == []  # unreadable -> start fresh
 
 
-@pytest.mark.asyncio
-async def test_push_to_karakeep_unreachable_returns_false(monkeypatch) -> None:
-    monkeypatch.setattr(sync_activities, "KARAKEEP_URL", "http://localhost:1")
-
-    def boom(*a, **kw):
-        raise requests.RequestException("down")
-
-    monkeypatch.setattr(sync_activities.requests, "post", boom)
-
-    env = ActivityEnvironment()
-    media = MediaItem(pk="1", code="c1", username="a", caption="cap")
-    assert await env.run(push_to_karakeep, media) is False
+# --- Karakeep -----------------------------------------------------------------
 
 
 def test_build_payload_injects_title_and_note() -> None:
-    media = MediaItem(pk="1", code="abc", username="someone", caption="line1\nline2")
-    payload = _build_payload(media)
+    payload = build_payload(MEDIA)
     assert payload["type"] == "link"
     assert payload["url"] == "https://www.instagram.com/p/abc/"
     assert payload["title"] == "@someone — line1"
     assert payload["note"] == "line1\nline2"
+
+
+def test_create_bookmark_unreachable_returns_false(monkeypatch) -> None:
+    def boom(*a, **kw):
+        raise requests.RequestException("down")
+
+    monkeypatch.setattr("app.sync.karakeep.requests.post", boom)
+    assert create_bookmark(MEDIA) is False
+
+
+def test_create_bookmark_success(monkeypatch) -> None:
+    class FakeResponse:
+        status_code = 201
+
+        def json(self):
+            return {"id": "bm-1"}
+
+    monkeypatch.setattr("app.sync.karakeep.requests.post", lambda *a, **kw: FakeResponse())
+    assert create_bookmark(MEDIA) is True
+
+
+# --- Instagram ----------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "message,expected",
+    [
+        ("ChallengeRequired", True),
+        ("login_required: 467", True),
+        ("feedback_required", True),
+        ("plain network error", False),
+    ],
+)
+def test_is_challenge_error(message: str, expected: bool) -> None:
+    assert is_challenge_error(Exception(message)) is expected
+
+
+@pytest.mark.asyncio
+async def test_fetch_saved_wraps_challenge(monkeypatch) -> None:
+    def boom(params):
+        raise Exception("login_required: checkpoint required")
+
+    monkeypatch.setattr(instagram_svc, "fetch_saved_media", boom)
+
+    env = ActivityEnvironment()
+    with pytest.raises(ApplicationError) as exc_info:
+        await env.run(fetch_saved, SyncParams())
+    assert exc_info.value.type == CHALLENGE_ERROR_TYPE
+
+
+# --- ActivityEnvironment mechanics (generic) -----------------------------------
 
 
 @pytest.mark.asyncio

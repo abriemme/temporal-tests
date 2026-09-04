@@ -26,8 +26,13 @@ from app.config import (
     TEMPORAL_NAMESPACE,
     get_build_id,
 )
-from app.sync_activities import fetch_saved, load_seen, push_to_karakeep, save_seen
-from app.sync_workflow import IgSyncWorkflow
+from app.sync import (
+    IgSyncWorkflow,
+    fetch_saved,
+    load_seen,
+    push_to_karakeep,
+    save_seen,
+)
 
 
 async def main() -> None:

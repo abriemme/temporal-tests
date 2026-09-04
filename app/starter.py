@@ -15,7 +15,7 @@ from temporalio.client import Client, Schedule, ScheduleActionStartWorkflow, Sch
 from temporalio.common import RetryPolicy
 
 from app.config import TASK_QUEUE, TEMPORAL_ADDRESS, TEMPORAL_NAMESPACE
-from app.sync_workflow import IgSyncWorkflow, SyncInput
+from app.sync import IgSyncWorkflow, SyncInput
 
 SCHEDULE_ID = "ig-to-karakeep-nightly"
 

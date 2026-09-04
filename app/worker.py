@@ -27,9 +27,10 @@ from app.config import (
     TEMPORAL_NAMESPACE,
     get_build_id,
 )
+from app.observability import setup_logfire
 from app.sync import (
     IgSyncWorkflow,
-    fetch_saved,
+    fetch_saved_page,
     load_seen,
     push_to_karakeep,
     save_seen,
@@ -38,6 +39,7 @@ from app.sync import (
 
 async def main() -> None:
     logging.basicConfig(level=logging.INFO)
+    setup_logfire()
 
     build_id = get_build_id()
     logging.info(
@@ -53,7 +55,7 @@ async def main() -> None:
         client,
         task_queue=TASK_QUEUE,
         workflows=[IgSyncWorkflow],
-        activities=[fetch_saved, load_seen, push_to_karakeep, save_seen],
+        activities=[fetch_saved_page, load_seen, push_to_karakeep, save_seen],
         # pydantic-ai (LLM enrichment in the push activity) relies on
         # beartype, which monkey-patches the import machinery and is
         # incompatible with the workflow sandbox. The workflow code itself

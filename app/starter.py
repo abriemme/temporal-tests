@@ -25,9 +25,10 @@ async def _client() -> Client:
 
 async def sync(args: list[str]) -> None:
     backfill = "--backfill" in args
+    reconcile = "--reconcile" in args
     handle = await (await _client()).start_workflow(
         IgSyncWorkflow.run,
-        SyncInput(backfill=backfill),
+        SyncInput(backfill=backfill, reconcile=reconcile),
         id=f"ig-sync-{'backfill' if backfill else 'run'}-{uuid.uuid4().hex[:8]}",
         task_queue=TASK_QUEUE,
     )

@@ -24,12 +24,15 @@ from app.sync import IgSyncWorkflow, SyncInput
 HISTORIES_DIR = Path(__file__).resolve().parents[1] / "tests" / "histories"
 
 
-@activity.defn(name="fetch_saved")
-async def fetch_saved(params) -> list:
-    return [
-        {"pk": "2", "code": "c2", "username": "a", "caption": "new"},
-        {"pk": "1", "code": "c1", "username": "a", "caption": "old"},
-    ]
+@activity.defn(name="fetch_saved_page")
+async def fetch_saved_page(params) -> dict:
+    return {
+        "items": [
+            {"pk": "2", "code": "c2", "username": "a", "caption": "new"},
+            {"pk": "1", "code": "c1", "username": "a", "caption": "old"},
+        ],
+        "next_cursor": "",
+    }
 
 
 @activity.defn(name="load_seen")
@@ -43,8 +46,8 @@ async def save_seen(seen: list[str]) -> None:
 
 
 @activity.defn(name="push_to_karakeep")
-async def push_to_karakeep(media) -> bool:
-    return True
+async def push_to_karakeep(params) -> dict:
+    return {"status": "imported", "assets": {}, "lists": []}
 
 
 async def main() -> None:
@@ -54,7 +57,7 @@ async def main() -> None:
             env.client,
             task_queue=TASK_QUEUE,
             workflows=[IgSyncWorkflow],
-            activities=[fetch_saved, load_seen, save_seen, push_to_karakeep],
+            activities=[fetch_saved_page, load_seen, save_seen, push_to_karakeep],
             workflow_runner=UnsandboxedWorkflowRunner(),
         ):
             handle = await env.client.start_workflow(

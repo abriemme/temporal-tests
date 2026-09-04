@@ -20,15 +20,18 @@ import app.sync.activities as activities
 import app.sync.instagram as instagram_svc
 import app.sync.karakeep as karakeep_svc
 import app.sync.state as state_svc
-from app.sync.activities import fetch_saved, push_to_karakeep
-from app.sync.enrich import NOTE_MAX, TITLE_MAX
-from app.sync.instagram import fetch_saved_media, get_client, is_challenge_error
+from app.sync.activities import fetch_saved_page, push_to_karakeep
+from app.sync.enrich import TITLE_MAX
+from app.sync.facts import NOTE_MAX
+from app.sync.instagram import get_client, is_challenge_error
 from app.sync.karakeep import build_payload, create_bookmark, fetch_lists
 from app.sync.models import (
     CHALLENGE_ERROR_TYPE,
     EnrichedBookmark,
+    FetchPageParams,
     MediaItem,
-    SyncParams,
+    PushOutcome,
+    PushParams,
 )
 from app.sync.state import load_seen, save_seen
 
@@ -101,14 +104,14 @@ def test_fetch_lists_parses_and_caches(monkeypatch) -> None:
     assert calls["n"] == 1
 
 
-def test_create_bookmark_unreachable_returns_false(monkeypatch) -> None:
+def test_create_bookmark_unreachable_returns_failed(monkeypatch) -> None:
     monkeypatch.setattr(karakeep_svc, "_lists_cache", [])
 
     def boom(*a, **kw):
         raise requests.RequestException("down")
 
     monkeypatch.setattr("app.sync.karakeep.requests.post", boom)
-    assert create_bookmark(MEDIA, ENRICHMENT) is False
+    assert create_bookmark(MEDIA, ENRICHMENT).status == "failed"
 
 
 def test_create_bookmark_routes_to_classified_lists(monkeypatch) -> None:
@@ -139,7 +142,9 @@ def test_create_bookmark_routes_to_classified_lists(monkeypatch) -> None:
     monkeypatch.setattr("app.sync.karakeep.requests.put", fake_put)
 
     enrichment = EnrichedBookmark(title="t", note="n", tags=[], lists=["Cuisine & Vins"])
-    assert create_bookmark(MEDIA, enrichment) is True
+    outcome = create_bookmark(MEDIA, enrichment)
+    assert outcome.status == "imported"
+    assert outcome.lists == ["Cuisine & Vins"]
     # Only the classified list is targeted (no KARAKEEP_LIST_ID in tests).
     assert len(put_urls) == 1
     assert "/lists/l1/bookmarks/bm-1" in put_urls[0]
@@ -155,26 +160,26 @@ def test_fetch_lists_unreachable_returns_empty(monkeypatch) -> None:
     assert fetch_lists() == []
 
 
-def test_build_payload_truncates_and_caps_tags() -> None:
+def test_build_payload_truncates_and_drops_blank_tags() -> None:
     enrichment = EnrichedBookmark(
         title="T" * (TITLE_MAX + 50),
         note="N" * (NOTE_MAX + 100),
-        tags=["a", " ", "b", "c", "d"],  # blank dropped, capped to 3
+        tags=["a", " ", "b", "c", "d"],  # blank dropped; the cap is MAX_TAGS
     )
     payload = build_payload(MEDIA, enrichment)
     assert len(payload["title"]) == TITLE_MAX
     assert len(payload["note"]) == NOTE_MAX
-    assert payload["tags"] == ["a", "b", "c"]
+    assert payload["tags"] == ["a", "b", "c", "d"]
 
 
-def test_create_bookmark_bad_status_returns_false(monkeypatch) -> None:
+def test_create_bookmark_bad_status_returns_failed(monkeypatch) -> None:
     monkeypatch.setattr(karakeep_svc, "_lists_cache", [])
 
     class Rejected:
         status_code = 500
 
     monkeypatch.setattr("app.sync.karakeep.requests.post", lambda *a, **kw: Rejected())
-    assert create_bookmark(MEDIA, ENRICHMENT) is False
+    assert create_bookmark(MEDIA, ENRICHMENT).status == "failed"
 
 
 def test_create_bookmark_appends_default_list_and_dedups(monkeypatch) -> None:
@@ -203,7 +208,7 @@ def test_create_bookmark_appends_default_list_and_dedups(monkeypatch) -> None:
     )
 
     enrichment = EnrichedBookmark(title="t", note="n", tags=[], lists=["Cuisine & Vins"])
-    assert create_bookmark(MEDIA, enrichment) is True
+    assert create_bookmark(MEDIA, enrichment).status == "imported"
     assert len(put_urls) == 1  # l1 not added twice
     assert "/lists/l1/bookmarks/bm-9" in put_urls[0]
 
@@ -227,7 +232,7 @@ def test_create_bookmark_suppresses_list_add_failure(monkeypatch) -> None:
     monkeypatch.setattr("app.sync.karakeep.requests.put", lambda *a, **kw: PutRejected())
 
     enrichment = EnrichedBookmark(title="t", note="n", tags=[], lists=["Cuisine & Vins"])
-    assert create_bookmark(MEDIA, enrichment) is True
+    assert create_bookmark(MEDIA, enrichment).status == "imported"
 
 
 def test_create_bookmark_suppresses_list_add_network_error(monkeypatch) -> None:
@@ -249,7 +254,7 @@ def test_create_bookmark_suppresses_list_add_network_error(monkeypatch) -> None:
     monkeypatch.setattr("app.sync.karakeep.requests.put", put_boom)
 
     enrichment = EnrichedBookmark(title="t", note="n", tags=[], lists=["Cuisine & Vins"])
-    assert create_bookmark(MEDIA, enrichment) is True
+    assert create_bookmark(MEDIA, enrichment).status == "imported"
 
 
 # --- Instagram ----------------------------------------------------------------
@@ -281,7 +286,8 @@ class _FakeMedia:
         self.caption_text = caption
 
 
-def test_fetch_saved_media_maps_fields(monkeypatch) -> None:
+def test_fetch_saved_page_maps_fields(monkeypatch) -> None:
+    """Legacy (chunk-less) instagrapi build: one bulk page, no next cursor."""
     captured = {}
 
     class FakeClient:
@@ -294,17 +300,19 @@ def test_fetch_saved_media_maps_fields(monkeypatch) -> None:
             ]
 
     monkeypatch.setattr(instagram_svc, "get_client", lambda: FakeClient())
+    monkeypatch.setattr(instagram_svc, "_collections_by_media", {})
 
-    items = fetch_saved_media(SyncParams(max_items=7))
+    result = instagram_svc.fetch_saved_page(cursor="", backfill=False, max_items=7)
     assert captured == {"name": "ALL_MEDIA_AUTO_COLLECTION", "amount": 7}
-    assert items[0] == MediaItem(
+    assert result.next_cursor == ""
+    assert result.items[0] == MediaItem(
         pk="123", code="codeA", username="alice", caption="hello"
     )
     # Missing username falls back to "?"; missing caption becomes "".
-    assert items[1] == MediaItem(pk="456", code="codeB", username="?", caption="")
+    assert result.items[1] == MediaItem(pk="456", code="codeB", username="?", caption="")
 
 
-def test_fetch_saved_media_backfill_requests_all(monkeypatch) -> None:
+def test_fetch_saved_page_backfill_requests_all(monkeypatch) -> None:
     captured = {}
 
     class FakeClient:
@@ -313,18 +321,37 @@ def test_fetch_saved_media_backfill_requests_all(monkeypatch) -> None:
             return []
 
     monkeypatch.setattr(instagram_svc, "get_client", lambda: FakeClient())
-    fetch_saved_media(SyncParams(backfill=True, max_items=40))
+    instagram_svc.fetch_saved_page(cursor="", backfill=True, max_items=40)
     assert captured["amount"] == 0  # 0 = fetch the whole history
 
 
-def test_fetch_saved_media_propagates_client_error(monkeypatch) -> None:
+def test_fetch_saved_page_uses_chunk_api_and_returns_cursor(monkeypatch) -> None:
+    """A cursor-aware instagrapi build pages one chunk at a time."""
+    captured = {}
+
+    class FakeClient:
+        def collection_medias_v1_chunk(self, name, max_id=""):
+            captured["name"] = name
+            captured["max_id"] = max_id
+            return [_FakeMedia(789, "codeC", "bob", "hi")], "next-42"
+
+    monkeypatch.setattr(instagram_svc, "get_client", lambda: FakeClient())
+    monkeypatch.setattr(instagram_svc, "_collections_by_media", {})
+
+    result = instagram_svc.fetch_saved_page(cursor="cur-1", backfill=True, max_items=40)
+    assert captured == {"name": "ALL_MEDIA_AUTO_COLLECTION", "max_id": "cur-1"}
+    assert result.next_cursor == "next-42"
+    assert [m.pk for m in result.items] == ["789"]
+
+
+def test_fetch_saved_page_propagates_client_error(monkeypatch) -> None:
     class FakeClient:
         def collection_medias(self, name, amount):
             raise Exception("login_required: 467")
 
     monkeypatch.setattr(instagram_svc, "get_client", lambda: FakeClient())
     with pytest.raises(Exception, match="467"):
-        fetch_saved_media(SyncParams())
+        instagram_svc.fetch_saved_page(cursor="", backfill=False, max_items=40)
 
 
 def test_get_client_raises_without_instagrapi() -> None:
@@ -336,29 +363,29 @@ def test_get_client_raises_without_instagrapi() -> None:
 
 
 @pytest.mark.asyncio
-async def test_fetch_saved_wraps_challenge(monkeypatch) -> None:
-    def boom(params):
+async def test_fetch_saved_page_wraps_challenge(monkeypatch) -> None:
+    def boom(**kwargs):
         raise Exception("login_required: checkpoint required")
 
-    monkeypatch.setattr(instagram_svc, "fetch_saved_media", boom)
+    monkeypatch.setattr(instagram_svc, "fetch_saved_page", boom)
 
     env = ActivityEnvironment()
     with pytest.raises(ApplicationError) as exc_info:
-        await env.run(fetch_saved, SyncParams())
+        await env.run(fetch_saved_page, FetchPageParams())
     assert exc_info.value.type == CHALLENGE_ERROR_TYPE
 
 
 @pytest.mark.asyncio
-async def test_fetch_saved_reraises_non_challenge(monkeypatch) -> None:
+async def test_fetch_saved_page_reraises_non_challenge(monkeypatch) -> None:
     """A plain (non-challenge) error is re-raised untyped, so Temporal retries."""
 
-    def boom(params):
+    def boom(**kwargs):
         raise ValueError("transient network blip")
 
-    monkeypatch.setattr(instagram_svc, "fetch_saved_media", boom)
+    monkeypatch.setattr(instagram_svc, "fetch_saved_page", boom)
 
     with pytest.raises(ValueError, match="transient"):
-        await ActivityEnvironment().run(fetch_saved, SyncParams())
+        await ActivityEnvironment().run(fetch_saved_page, FetchPageParams())
 
 
 # --- ActivityEnvironment mechanics (generic) -----------------------------------
@@ -408,20 +435,29 @@ async def test_activity_cancellation() -> None:
 @pytest.mark.asyncio
 async def test_push_to_karakeep_enriches_and_creates(monkeypatch) -> None:
     seen_lists: list[str] = []
+    built: list[EnrichedBookmark] = []
 
     async def fake_enrich(media, list_names):
         seen_lists.extend(list_names)
         return ENRICHMENT
 
+    def fake_create(media, enrichment):
+        built.append(enrichment)
+        return PushOutcome(status="imported")
+
     monkeypatch.setattr(
         activities.karakeep, "fetch_lists", lambda: [{"id": "l1", "name": "Voyage"}]
     )
     monkeypatch.setattr(activities, "enrich_media", fake_enrich)
-    monkeypatch.setattr(activities.karakeep, "create_bookmark", lambda m, e: True)
+    monkeypatch.setattr(activities.karakeep, "create_bookmark", fake_create)
 
-    assert await ActivityEnvironment().run(push_to_karakeep, MEDIA) is True
+    outcome = await ActivityEnvironment().run(push_to_karakeep, PushParams(media=MEDIA))
+    assert outcome.status == "imported"
     # The classifier is offered the account's real list names.
     assert seen_lists == ["Voyage"]
+    # The deterministic note/tags replace the raw LLM output before creation.
+    assert built[0].note.startswith("@someone")
+    assert built[0].tags[0] == "someone"  # author tag comes first
 
 
 @pytest.mark.asyncio
@@ -431,9 +467,36 @@ async def test_push_to_karakeep_reports_failure(monkeypatch) -> None:
 
     monkeypatch.setattr(activities.karakeep, "fetch_lists", lambda: [])
     monkeypatch.setattr(activities, "enrich_media", fake_enrich)
-    monkeypatch.setattr(activities.karakeep, "create_bookmark", lambda m, e: False)
+    monkeypatch.setattr(
+        activities.karakeep, "create_bookmark", lambda m, e: PushOutcome(status="failed")
+    )
 
-    assert await ActivityEnvironment().run(push_to_karakeep, MEDIA) is False
+    outcome = await ActivityEnvironment().run(push_to_karakeep, PushParams(media=MEDIA))
+    assert outcome.status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_push_to_karakeep_reconcile_completes_without_llm(monkeypatch) -> None:
+    """Reconcile short-circuits the LLM when the bookmark already exists."""
+
+    async def fail_enrich(media, list_names):  # pragma: no cover - must not run
+        raise AssertionError("the LLM must not be called in reconcile mode")
+
+    monkeypatch.setattr(activities, "enrich_media", fail_enrich)
+    monkeypatch.setattr(
+        activities.karakeep, "find_existing_bookmark", lambda m: {"id": "bm-1"}
+    )
+    monkeypatch.setattr(
+        activities.karakeep,
+        "complete_existing",
+        lambda m, bm: PushOutcome(status="completed", assets={"screenshot": 1}),
+    )
+
+    outcome = await ActivityEnvironment().run(
+        push_to_karakeep, PushParams(media=MEDIA, reconcile=True)
+    )
+    assert outcome.status == "completed"
+    assert outcome.assets == {"screenshot": 1}
 
 
 @pytest.mark.asyncio

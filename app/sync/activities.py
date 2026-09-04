@@ -30,11 +30,11 @@ async def fetch_saved(params: SyncParams) -> list[MediaItem]:
 
 @activity.defn
 async def push_to_karakeep(media: MediaItem) -> bool:
-    """Create the bookmark (and add it to the list if configured)."""
-    # Enrichment is LLM-powered (pydantic-ai) but never fails the push: it
-    # falls back to a heuristic internally.
-    enrichment = await enrich_media(media)
-    pushed = karakeep.create_bookmark(media, enrichment=enrichment)
+    """Enrich the post, create the bookmark and route it to its list(s)."""
+    # The classifier picks from the account's real lists (cached per worker).
+    lists = karakeep.fetch_lists()
+    enrichment = await enrich_media(media, list_names=[item["name"] for item in lists])
+    pushed = karakeep.create_bookmark(media, enrichment)
     if pushed:
         activity.logger.info("+ https://www.instagram.com/p/%s/", media.code)
     else:

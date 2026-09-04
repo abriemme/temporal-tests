@@ -9,8 +9,8 @@ A production-grade rewrite of a real automation: every night, the posts saved
 on an Instagram account are turned into enriched bookmarks in
 [Karakeep](https://karakeep.app/). It was previously a Python script driven by
 n8n over HTTP; it is now a **Temporal application** — durable, replayable, and
-testable — with **LLM-powered enrichment** (title, summary, tags) via
-[pydantic-ai](https://ai.pydantic.dev).
+testable — with **LLM-powered enrichment** (title, summary, tags, and routing
+into the right Karakeep lists) via [pydantic-ai](https://ai.pydantic.dev).
 
 ## Why Temporal (what the n8n version had to hand-roll)
 
@@ -53,10 +53,13 @@ flowchart LR
 - **Activities** (`app/sync/activities.py`) — thin Temporal wrappers; all I/O
   lives in a service layer (`instagram.py`, `karakeep.py`, `state.py`),
   unit-testable without any worker.
-- **Enrichment** (`app/sync/enrich.py`) — a pydantic-ai agent turns each
-  caption into a structured `Enrichment` (clean title, summary, up to 3 tags).
-  Opt-in (`ENRICH_BOOKMARKS=1` + provider key), with a deterministic heuristic
-  fallback so the sync never depends on an LLM being up.
+- **Enrichment** (`app/sync/enrich.py`) — a pydantic-ai agent (GPT-5-mini)
+  turns each caption into a structured `EnrichedBookmark`: a clean title, a
+  summary, up to 3 tags (reusing the caption's hashtags when it has any), and
+  the Karakeep list(s) the post belongs to — chosen from the account's actual
+  lists (fetched once and cached), copied verbatim, and left empty when nothing
+  clearly fits. Transient provider errors are absorbed by the push activity's
+  retry policy.
 
 ## Engineering practices
 
@@ -80,18 +83,18 @@ flowchart LR
 app/
   config.py            # env-based settings + build_id resolution (git SHA)
   sync/
-    models.py          # SyncInput/SyncParams/SyncSummary, MediaItem, Enrichment (no I/O)
+    models.py          # SyncInput/SyncParams/SyncSummary, MediaItem, EnrichedBookmark (no I/O)
     workflow.py        # IgSyncWorkflow: dedup, ordering, pacing, cooldown timer
     activities.py      # thin @activity.defn wrappers
     instagram.py       # instagrapi session + saved-posts fetch (service)
     karakeep.py        # bookmark creation, payload, list membership (service)
-    enrich.py          # pydantic-ai agent + heuristic fallback (service)
+    enrich.py          # pydantic-ai agent: title/note/tags + list routing (service)
     state.py           # seen.json dedup state (service)
   starter.py           # manual sync run + nightly Schedule creation (replaces n8n)
   worker.py            # versioned worker (use_worker_versioning=True)
 tests/
   conftest.py           # start_time_skipping() fixture
-  test_enrich.py        # pydantic-ai agent tests (TestModel) + fallback
+  test_enrich.py        # pydantic-ai agent tests (TestModel) + list routing
   test_activities.py    # service-layer unit tests + ActivityEnvironment mechanics
   test_sync_workflow.py # time-skipping workflow tests (mocked activities)
   test_replay.py        # replays tests/histories/*.json against current code
@@ -123,10 +126,11 @@ Environment:
 | Variable | Purpose |
 |---|---|
 | `KARAKEEP_URL`, `KARAKEEP_TOKEN` | Karakeep instance + API token (required) |
-| `KARAKEEP_LIST_ID` | optional list to add bookmarks to |
+| `KARAKEEP_LIST_ID` | optional list added to *every* bookmark, on top of the classified ones |
 | `DATA_DIR` | `session.json` (instagrapi) and `seen.json` (dedup) |
 | `MAX_ITEMS` | how many recent saved posts to examine per run |
-| `ENRICH_BOOKMARKS`, `ENRICH_MODEL`, `OPENAI_API_KEY` | LLM enrichment (opt-in) |
+| `OPENAI_API_KEY` | provider key for the enrichment agent (required) |
+| `ENRICH_MODEL` | override the model (default `openai:gpt-5-mini`) |
 
 Instagram login (once, interactive — produces `DATA_DIR/session.json`):
 `instagrapi` session bootstrap; see `app/sync/instagram.py`.

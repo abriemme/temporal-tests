@@ -6,7 +6,7 @@ the activity side can import them safely.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from app.config import MAX_ITEMS
 
@@ -28,17 +28,23 @@ class SyncInput:
     """Input of ``IgSyncWorkflow``."""
 
     backfill: bool = False
-    max_items: int = 40
+    max_items: int = MAX_ITEMS
     cooldown_hours: float = 24.0
 
 
 @dataclass
-class Enrichment:
-    """Structured LLM output for one Instagram post (title, summary, tags)."""
+class EnrichedBookmark:
+    """Structured LLM output for one saved post: bookmark fields + list routing.
+
+    ``lists`` holds the exact names of the Karakeep lists the post belongs to
+    (copied verbatim, accents and ampersands included); it is empty when no
+    list clearly fits.
+    """
 
     title: str
     note: str
     tags: list[str]
+    lists: list[str] = field(default_factory=list)
 
 
 @dataclass

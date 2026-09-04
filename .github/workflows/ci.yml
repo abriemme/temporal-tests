@@ -46,11 +46,20 @@ jobs:
 
       # Unit tests (time-skipping) + replay test on the histories committed in
       # tests/histories/. Replay downloads the bundled Temporal test server;
-      # nothing else to provision.
-      - name: Run tests (unit + replay)
+      # nothing else to provision. Coverage (with a fail-under threshold) is
+      # wired via addopts in pyproject.toml, so `pytest` enforces it here.
+      - name: Run tests (unit + replay, with coverage)
         env:
           GIT_SHA: ${{ github.sha }}
         run: uv run pytest -v
+
+      - name: Upload coverage report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          if-no-files-found: warn
 
   docker:
     name: Build & push image (tag = SHA)

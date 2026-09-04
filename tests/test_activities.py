@@ -16,11 +16,13 @@ from temporalio import activity
 from temporalio.exceptions import ApplicationError
 from temporalio.testing import ActivityEnvironment
 
+import app.sync.activities as activities
 import app.sync.instagram as instagram_svc
 import app.sync.karakeep as karakeep_svc
 import app.sync.state as state_svc
-from app.sync.activities import fetch_saved
-from app.sync.instagram import is_challenge_error
+from app.sync.activities import fetch_saved, push_to_karakeep
+from app.sync.enrich import NOTE_MAX, TITLE_MAX
+from app.sync.instagram import fetch_saved_media, get_client, is_challenge_error
 from app.sync.karakeep import build_payload, create_bookmark, fetch_lists
 from app.sync.models import (
     CHALLENGE_ERROR_TYPE,
@@ -143,6 +145,113 @@ def test_create_bookmark_routes_to_classified_lists(monkeypatch) -> None:
     assert "/lists/l1/bookmarks/bm-1" in put_urls[0]
 
 
+def test_fetch_lists_unreachable_returns_empty(monkeypatch) -> None:
+    monkeypatch.setattr(karakeep_svc, "_lists_cache", None)
+
+    def boom(*a, **kw):
+        raise requests.RequestException("down")
+
+    monkeypatch.setattr("app.sync.karakeep.requests.get", boom)
+    assert fetch_lists() == []
+
+
+def test_build_payload_truncates_and_caps_tags() -> None:
+    enrichment = EnrichedBookmark(
+        title="T" * (TITLE_MAX + 50),
+        note="N" * (NOTE_MAX + 100),
+        tags=["a", " ", "b", "c", "d"],  # blank dropped, capped to 3
+    )
+    payload = build_payload(MEDIA, enrichment)
+    assert len(payload["title"]) == TITLE_MAX
+    assert len(payload["note"]) == NOTE_MAX
+    assert payload["tags"] == ["a", "b", "c"]
+
+
+def test_create_bookmark_bad_status_returns_false(monkeypatch) -> None:
+    monkeypatch.setattr(karakeep_svc, "_lists_cache", [])
+
+    class Rejected:
+        status_code = 500
+
+    monkeypatch.setattr("app.sync.karakeep.requests.post", lambda *a, **kw: Rejected())
+    assert create_bookmark(MEDIA, ENRICHMENT) is False
+
+
+def test_create_bookmark_appends_default_list_and_dedups(monkeypatch) -> None:
+    monkeypatch.setattr(
+        karakeep_svc, "_lists_cache", [{"id": "l1", "name": "Cuisine & Vins"}]
+    )
+    # A configured default list is added to every bookmark, without duplicating
+    # a classified list that resolves to the same id.
+    monkeypatch.setattr(karakeep_svc, "KARAKEEP_LIST_ID", "l1")
+
+    class Created:
+        status_code = 201
+
+        def json(self):
+            return {"id": "bm-9"}
+
+    put_urls: list[str] = []
+
+    class PutOk:
+        status_code = 204
+
+    monkeypatch.setattr("app.sync.karakeep.requests.post", lambda *a, **kw: Created())
+    monkeypatch.setattr(
+        "app.sync.karakeep.requests.put",
+        lambda url, *a, **kw: (put_urls.append(url), PutOk())[1],
+    )
+
+    enrichment = EnrichedBookmark(title="t", note="n", tags=[], lists=["Cuisine & Vins"])
+    assert create_bookmark(MEDIA, enrichment) is True
+    assert len(put_urls) == 1  # l1 not added twice
+    assert "/lists/l1/bookmarks/bm-9" in put_urls[0]
+
+
+def test_create_bookmark_suppresses_list_add_failure(monkeypatch) -> None:
+    """A rejected list add must not fail the (already created) bookmark."""
+    monkeypatch.setattr(
+        karakeep_svc, "_lists_cache", [{"id": "l1", "name": "Cuisine & Vins"}]
+    )
+
+    class Created:
+        status_code = 201
+
+        def json(self):
+            return {"id": "bm-1"}
+
+    class PutRejected:
+        status_code = 500
+
+    monkeypatch.setattr("app.sync.karakeep.requests.post", lambda *a, **kw: Created())
+    monkeypatch.setattr("app.sync.karakeep.requests.put", lambda *a, **kw: PutRejected())
+
+    enrichment = EnrichedBookmark(title="t", note="n", tags=[], lists=["Cuisine & Vins"])
+    assert create_bookmark(MEDIA, enrichment) is True
+
+
+def test_create_bookmark_suppresses_list_add_network_error(monkeypatch) -> None:
+    """A network failure on the list add is swallowed too (bookmark stays)."""
+    monkeypatch.setattr(
+        karakeep_svc, "_lists_cache", [{"id": "l1", "name": "Cuisine & Vins"}]
+    )
+
+    class Created:
+        status_code = 201
+
+        def json(self):
+            return {"id": "bm-1"}
+
+    def put_boom(*a, **kw):
+        raise requests.RequestException("down")
+
+    monkeypatch.setattr("app.sync.karakeep.requests.post", lambda *a, **kw: Created())
+    monkeypatch.setattr("app.sync.karakeep.requests.put", put_boom)
+
+    enrichment = EnrichedBookmark(title="t", note="n", tags=[], lists=["Cuisine & Vins"])
+    assert create_bookmark(MEDIA, enrichment) is True
+
+
 # --- Instagram ----------------------------------------------------------------
 
 
@@ -159,6 +268,73 @@ def test_is_challenge_error(message: str, expected: bool) -> None:
     assert is_challenge_error(Exception(message)) is expected
 
 
+class _FakeUser:
+    def __init__(self, username: str | None) -> None:
+        self.username = username
+
+
+class _FakeMedia:
+    def __init__(self, pk, code, username, caption) -> None:
+        self.pk = pk
+        self.code = code
+        self.user = _FakeUser(username)
+        self.caption_text = caption
+
+
+def test_fetch_saved_media_maps_fields(monkeypatch) -> None:
+    captured = {}
+
+    class FakeClient:
+        def collection_medias(self, name, amount):
+            captured["name"] = name
+            captured["amount"] = amount
+            return [
+                _FakeMedia(123, "codeA", "alice", "  hello  "),
+                _FakeMedia(456, "codeB", None, None),  # missing user/caption
+            ]
+
+    monkeypatch.setattr(instagram_svc, "get_client", lambda: FakeClient())
+
+    items = fetch_saved_media(SyncParams(max_items=7))
+    assert captured == {"name": "ALL_MEDIA_AUTO_COLLECTION", "amount": 7}
+    assert items[0] == MediaItem(
+        pk="123", code="codeA", username="alice", caption="hello"
+    )
+    # Missing username falls back to "?"; missing caption becomes "".
+    assert items[1] == MediaItem(pk="456", code="codeB", username="?", caption="")
+
+
+def test_fetch_saved_media_backfill_requests_all(monkeypatch) -> None:
+    captured = {}
+
+    class FakeClient:
+        def collection_medias(self, name, amount):
+            captured["amount"] = amount
+            return []
+
+    monkeypatch.setattr(instagram_svc, "get_client", lambda: FakeClient())
+    fetch_saved_media(SyncParams(backfill=True, max_items=40))
+    assert captured["amount"] == 0  # 0 = fetch the whole history
+
+
+def test_fetch_saved_media_propagates_client_error(monkeypatch) -> None:
+    class FakeClient:
+        def collection_medias(self, name, amount):
+            raise Exception("login_required: 467")
+
+    monkeypatch.setattr(instagram_svc, "get_client", lambda: FakeClient())
+    with pytest.raises(Exception, match="467"):
+        fetch_saved_media(SyncParams())
+
+
+def test_get_client_raises_without_instagrapi() -> None:
+    # instagrapi lives in the optional "ig" group and is absent from the test
+    # env, so get_client should surface a clear RuntimeError rather than a bare
+    # ImportError.
+    with pytest.raises(RuntimeError):
+        get_client()
+
+
 @pytest.mark.asyncio
 async def test_fetch_saved_wraps_challenge(monkeypatch) -> None:
     def boom(params):
@@ -170,6 +346,19 @@ async def test_fetch_saved_wraps_challenge(monkeypatch) -> None:
     with pytest.raises(ApplicationError) as exc_info:
         await env.run(fetch_saved, SyncParams())
     assert exc_info.value.type == CHALLENGE_ERROR_TYPE
+
+
+@pytest.mark.asyncio
+async def test_fetch_saved_reraises_non_challenge(monkeypatch) -> None:
+    """A plain (non-challenge) error is re-raised untyped, so Temporal retries."""
+
+    def boom(params):
+        raise ValueError("transient network blip")
+
+    monkeypatch.setattr(instagram_svc, "fetch_saved_media", boom)
+
+    with pytest.raises(ValueError, match="transient"):
+        await ActivityEnvironment().run(fetch_saved, SyncParams())
 
 
 # --- ActivityEnvironment mechanics (generic) -----------------------------------
@@ -211,3 +400,47 @@ async def test_activity_cancellation() -> None:
 
     with pytest.raises(asyncio.CancelledError):
         await asyncio.gather(env.run(cancellable_activity), cancel_soon())
+
+
+# --- Sync activity wrappers ----------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_push_to_karakeep_enriches_and_creates(monkeypatch) -> None:
+    seen_lists: list[str] = []
+
+    async def fake_enrich(media, list_names):
+        seen_lists.extend(list_names)
+        return ENRICHMENT
+
+    monkeypatch.setattr(
+        activities.karakeep, "fetch_lists", lambda: [{"id": "l1", "name": "Voyage"}]
+    )
+    monkeypatch.setattr(activities, "enrich_media", fake_enrich)
+    monkeypatch.setattr(activities.karakeep, "create_bookmark", lambda m, e: True)
+
+    assert await ActivityEnvironment().run(push_to_karakeep, MEDIA) is True
+    # The classifier is offered the account's real list names.
+    assert seen_lists == ["Voyage"]
+
+
+@pytest.mark.asyncio
+async def test_push_to_karakeep_reports_failure(monkeypatch) -> None:
+    async def fake_enrich(media, list_names):
+        return ENRICHMENT
+
+    monkeypatch.setattr(activities.karakeep, "fetch_lists", lambda: [])
+    monkeypatch.setattr(activities, "enrich_media", fake_enrich)
+    monkeypatch.setattr(activities.karakeep, "create_bookmark", lambda m, e: False)
+
+    assert await ActivityEnvironment().run(push_to_karakeep, MEDIA) is False
+
+
+@pytest.mark.asyncio
+async def test_load_and_save_seen_activities(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(state_svc, "STATE_FILE", tmp_path / "seen.json")
+    env = ActivityEnvironment()
+
+    assert await env.run(activities.load_seen) == []  # empty state
+    await env.run(activities.save_seen, ["2", "1"])
+    assert await env.run(activities.load_seen) == ["1", "2"]
